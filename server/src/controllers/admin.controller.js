@@ -1,37 +1,17 @@
 const { prisma } = require('../middleware/auth');
 const { success, error } = require('../utils/response');
 
-async function getSettings(req, res, next) {
-  try {
-    const settings = await prisma.appSetting.findMany();
-    const map = {};
-    settings.forEach(s => { map[s.key] = s.value; });
-    return success(res, map);
-  } catch (err) { next(err); }
-}
-
-async function updateSettings(req, res, next) {
-  try {
-    const updates = req.body;
-    const results = [];
-    for (const [key, value] of Object.entries(updates)) {
-      const setting = await prisma.appSetting.upsert({
-        where: { key },
-        create: { key, value: String(value) },
-        update: { value: String(value) },
-      });
-      results.push(setting);
-    }
-    return success(res, results);
-  } catch (err) { next(err); }
-}
+const settingsService = require('../services/settings.service');
+const { parseDateOnly } = require('../utils/dateOnly');
+async function getSettings(req, res, next) { try { return success(res, await settingsService.getSettings()); } catch (err) { next(err); } }
+async function updateSettings(req, res, next) { try { return success(res, await settingsService.updateSettings(req.body)); } catch (err) { next(err); } }
 
 // ── Attendance Reopen ──
 
 async function reopenDate(req, res, next) {
   try {
     const { date } = req.body;
-    if (!date) return error(res, 'Date required', 400);
+    parseDateOnly(date);
     const key = `reopen_${date}`;
     await prisma.appSetting.upsert({
       where: { key },
@@ -45,7 +25,7 @@ async function reopenDate(req, res, next) {
 async function closeDate(req, res, next) {
   try {
     const { date } = req.body;
-    if (!date) return error(res, 'Date required', 400);
+    parseDateOnly(date);
     const key = `reopen_${date}`;
     await prisma.appSetting.deleteMany({ where: { key } });
     return success(res, { date, reopened: false });
@@ -55,7 +35,8 @@ async function closeDate(req, res, next) {
 async function bulkReopenDates(req, res, next) {
   try {
     const { dates } = req.body;
-    if (!dates || !Array.isArray(dates)) return error(res, 'Dates array required', 400);
+    if (!Array.isArray(dates) || dates.length > 366) return error(res, 'Use at most 366 dates', 400);
+    dates.forEach(parseDateOnly);
     for (const date of dates) {
       const key = `reopen_${date}`;
       await prisma.appSetting.upsert({ where: { key }, create: { key, value: 'true' }, update: { value: 'true' } });
@@ -67,7 +48,8 @@ async function bulkReopenDates(req, res, next) {
 async function bulkCloseDates(req, res, next) {
   try {
     const { dates } = req.body;
-    if (!dates || !Array.isArray(dates)) return error(res, 'Dates array required', 400);
+    if (!Array.isArray(dates) || dates.length > 366) return error(res, 'Use at most 366 dates', 400);
+    dates.forEach(parseDateOnly);
     for (const date of dates) {
       await prisma.appSetting.deleteMany({ where: { key: `reopen_${date}` } });
     }
@@ -128,7 +110,7 @@ async function deleteRoom(req, res, next) {
 async function aiQuery(req, res, next) {
   try {
     const { query, roomId } = req.body;
-    if (!query) return error(res, 'Query required', 400);
+    if (typeof query !== 'string' || !query.trim() || query.length > 10000) return error(res, 'Query must contain 1 to 10000 characters', 400);
 
     const aiService = require('../services/ai.service');
     const { buildContext } = require('../services/ai.context');
@@ -139,34 +121,31 @@ async function aiQuery(req, res, next) {
     if (roomId) {
       room = await prisma.chatRoom.findFirst({ where: { id: roomId, userId } });
       if (!room) return error(res, 'Room not found', 404);
-    } else {
-      room = await prisma.chatRoom.create({ data: { userId, name: "New Chat" } });
     }
 
     // Load last 20 messages from this room as context
-    const history = await prisma.chatMessage.findMany({
+    const history = room ? await prisma.chatMessage.findMany({
       where: { roomId: room.id },
       orderBy: { createdAt: 'desc' },
       take: 20,
-    });
+    }) : [];
     history.reverse();
 
     const messages = history.map(m => ({ role: m.role, content: m.content }));
     messages.push({ role: 'user', content: query });
-
-    // Save user message
-    await prisma.chatMessage.create({ data: { roomId: room.id, role: 'user', content: query } });
 
     // Build real-time DB context
     const dbContext = await buildContext(userId);
 
     const response = await aiService.chat(messages, dbContext);
 
-    // Save assistant response
-    await prisma.chatMessage.create({ data: { roomId: room.id, role: 'assistant', content: response } });
-
-    // Touch room updatedAt
-    await prisma.chatRoom.update({ where: { id: room.id }, data: {} });
+    // Save both sides only after the provider succeeds; failures leave no partial chat.
+    room = await prisma.$transaction(async tx => {
+      const savedRoom = room || await tx.chatRoom.create({ data: { userId, name: 'New Chat' } });
+      await tx.chatMessage.create({ data: { roomId: savedRoom.id, role: 'user', content: query } });
+      await tx.chatMessage.create({ data: { roomId: savedRoom.id, role: 'assistant', content: response } });
+      return tx.chatRoom.update({ where: { id: savedRoom.id }, data: { updatedAt: new Date() } });
+    });
 
     return success(res, { response, roomId: room.id });
   } catch (err) {

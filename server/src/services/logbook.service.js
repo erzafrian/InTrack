@@ -1,8 +1,8 @@
 const { prisma } = require('../middleware/auth');
+const { parseDateOnly } = require('../utils/dateOnly');
 
 async function getOrCreateEntry(userId, date) {
-  const entryDate = new Date(date);
-  entryDate.setHours(0, 0, 0, 0);
+  const entryDate = parseDateOnly(date);
 
   return prisma.logbookEntry.upsert({
     where: { userId_date: { userId, date: entryDate } },
@@ -24,8 +24,9 @@ async function getEntries(userId, role, query) {
 
   if (startDate || endDate) {
     where.date = {};
-    if (startDate) where.date.gte = new Date(startDate);
-    if (endDate) where.date.lte = new Date(endDate);
+    if (startDate) where.date.gte = parseDateOnly(startDate);
+    if (endDate) where.date.lte = parseDateOnly(endDate);
+    if (startDate && endDate && startDate > endDate) throw Object.assign(new Error('End date must not precede start date'), { statusCode: 400 });
   }
 
   return prisma.logbookEntry.findMany({

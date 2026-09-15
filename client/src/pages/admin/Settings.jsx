@@ -9,6 +9,10 @@ export default function Settings() {
   const [message, setMessage] = useState('');
   const [notionStatus, setNotionStatus] = useState({ connected: false, hasDatabaseId: false });
   const [notionLoading, setNotionLoading] = useState(false);
+  const [databases, setDatabases] = useState([]);
+  const [dataSourceId, setDataSourceId] = useState('');
+  const [syncs, setSyncs] = useState([]);
+  const [integrationError, setIntegrationError] = useState('');
 
   useEffect(() => {
     fetchSettings();
@@ -38,7 +42,27 @@ export default function Settings() {
     try {
       const res = await api.get('/auth/notion/status');
       setNotionStatus(res.data.data);
-    } catch {}
+      setDataSourceId(res.data.data.dataSourceId || '');
+      if (res.data.data.connected) {
+        const [sources, recent] = await Promise.all([api.get('/auth/notion/databases'), api.get('/auth/notion/syncs')]);
+        setDatabases(sources.data.data);
+        setSyncs(recent.data.data);
+      }
+    } catch (err) { setIntegrationError(err.response?.data?.error || 'Unable to load Notion settings'); }
+  };
+
+  const saveDatabase = async () => {
+    setNotionLoading(true); setIntegrationError('');
+    try { await api.put('/auth/notion/database', { dataSourceId }); await fetchNotionStatus(); }
+    catch (err) { setIntegrationError(err.response?.data?.error || 'Unable to select database'); }
+    finally { setNotionLoading(false); }
+  };
+
+  const retrySync = async (attendanceId) => {
+    setNotionLoading(true); setIntegrationError('');
+    try { await api.post(`/auth/notion/sync/${attendanceId}`); await fetchNotionStatus(); }
+    catch (err) { setIntegrationError(err.response?.data?.error || 'Unable to sync attendance'); }
+    finally { setNotionLoading(false); }
   };
 
   const handleSave = async () => {
@@ -153,6 +177,22 @@ export default function Settings() {
           <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>Integrations</h2>
         </div>
         <div className="space-y-2">
+          {integrationError && <p role="alert" className="text-sm text-red-400">{integrationError}</p>}
+          {notionStatus.connected && <div className="space-y-3 p-3">
+            <label className="label" htmlFor="notion-database">Shared attendance database</label>
+            <p className="text-xs">Required columns: Name (title), Status (select), Date (date), Distance (number), Reason (text). Share the database with the integration in Notion.</p>
+            <select id="notion-database" className="input" value={dataSourceId} onChange={e => setDataSourceId(e.target.value)}>
+              <option value="">Select a database</option>
+              {databases.map(db => <option key={db.id} value={db.id}>{db.name}</option>)}
+            </select>
+            <button className="btn btn-primary" disabled={notionLoading || !dataSourceId} onClick={saveDatabase}>Save database</button>
+            <button className="btn ml-2" disabled={notionLoading} onClick={fetchNotionStatus}>Refresh</button>
+            {notionStatus.hasDatabaseId && <p className="text-xs">Attendance from all interns will sync to this database.</p>}
+            {syncs.length > 0 && <div className="space-y-2"><h3 className="text-sm font-semibold">Recent syncs</h3>{syncs.map(sync => <div key={sync.id} className="flex justify-between gap-2 text-xs">
+              <span>{sync.entityId.slice(0, 8)}: {sync.status}</span>
+              {sync.status === 'failed' && <button className="btn" disabled={notionLoading} onClick={() => retrySync(sync.entityId)}>Retry</button>}
+            </div>)}</div>}
+          </div>}
           {/* Notion — OAuth Connect */}
           <div className="flex items-center justify-between p-3 rounded-xl transition-all" style={{ background: 'var(--color-bg)' }}>
             <div className="flex items-center gap-3 min-w-0">
@@ -193,7 +233,7 @@ export default function Settings() {
             <div className="flex items-center gap-3 min-w-0">
               <Cloud size={18} style={{ color: 'var(--color-text-muted)' }} className="flex-shrink-0" />
               <div className="min-w-0">
-                <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>Cloudflare R2</p>
+                <p className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>S3 Storage (Supabase)</p>
                 <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)' }}>Evidence file storage</p>
               </div>
             </div>

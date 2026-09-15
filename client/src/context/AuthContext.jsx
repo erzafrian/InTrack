@@ -1,7 +1,7 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { getMe, login as loginApi, logout as logoutApi } from '../api/auth';
 
-const AuthContext = createContext(null);
+import { AuthContext } from './auth';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -9,6 +9,9 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     checkAuth();
+    const clearSession = () => setUser(null);
+    window.addEventListener('auth-expired', clearSession);
+    return () => window.removeEventListener('auth-expired', clearSession);
   }, []);
 
   async function checkAuth() {
@@ -38,10 +41,4 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
 }

@@ -6,6 +6,7 @@ export const submitAttendance = (data) => {
   const formData = new FormData();
   formData.append('date', data.date);
   formData.append('status', data.status);
+  if (data.faceProof) formData.append('faceProof', data.faceProof);
   if (data.latitude != null) formData.append('latitude', data.latitude);
   if (data.longitude != null) formData.append('longitude', data.longitude);
   if (data.reason) formData.append('reason', data.reason);

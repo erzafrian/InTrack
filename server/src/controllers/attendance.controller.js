@@ -3,55 +3,42 @@ const r2Service = require('../services/r2.service');
 const { success, error } = require('../utils/response');
 const { prisma } = require('../middleware/auth');
 
+const tokenService = require('../services/token.service');
+const { parseDateOnly } = require('../utils/dateOnly');
+const { todayKey, minutesNow } = require('../utils/operationalTime');
+const { getSettings } = require('../services/settings.service');
 async function submit(req, res, next) {
+  let fileUrl;
   try {
-    const { date, status, latitude, longitude, reason } = req.body;
-    if (!date || !status) return error(res, 'Date and status required', 400);
-    if (!['HADIR', 'IZIN', 'SAKIT'].includes(status)) return error(res, 'Invalid status', 400);
-    if (status === 'HADIR' && (latitude == null || longitude == null)) {
-      return error(res, "Geolocation is required when checking in as Present", 400);
+    const { date, status, latitude, longitude, reason, faceProof } = req.body;
+    parseDateOnly(date);
+    if (!['HADIR','IZIN','SAKIT'].includes(status)) return error(res, 'Invalid status', 400);
+    if (!faceProof) return error(res, 'Face verification required', 401);
+    if (!req.file) return error(res, 'Evidence must be uploaded', 400);
+    if (status === 'HADIR' && (latitude == null || longitude == null)) return error(res, 'Geolocation is required', 400);
+    for (const [value,limit] of [[latitude,90],[longitude,180]]) if (value != null && (String(value).trim() === '' || !Number.isFinite(Number(value)) || Math.abs(Number(value)) > limit)) return error(res, 'Invalid coordinates', 400);
+    if (status !== 'HADIR' && (typeof reason !== 'string' || !reason.trim())) return error(res, 'Reason is required for leave or sickness', 400);
+    if (date > todayKey()) return error(res, 'Future attendance cannot be submitted', 400);
+    if (date !== todayKey()) {
+      const reopened = await prisma.appSetting.findUnique({ where: { key: 'reopen_' + date } });
+      if (reopened?.value !== 'true') return error(res, 'This attendance date is closed', 400);
+    } else {
+      const settings = await getSettings();
+      const toMinutes = time => { const [h,m] = time.split(':').map(Number); return h*60+m; };
+      if (minutesNow() < toMinutes(settings.absen_start_time) || minutesNow() > toMinutes(settings.absen_end_time)) return error(res, 'Attendance is available from ' + settings.absen_start_time + ' to ' + settings.absen_end_time + ' WIB', 400);
     }
-
-    // Feature 2: Validate date must be today (unless reopened by admin)
-    const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
-    if (date !== todayStr) {
-      const reopened = await prisma.appSetting.findUnique({ where: { key: `reopen_${date}` } });
-      if (!reopened) {
-        return error(res, "Attendance can only be submitted for today", 400);
-      }
-    }
-
-    // Feature 2: Validate within attendance time window (only for today)
-    if (date === todayStr) {
-      const endTimeSetting = await prisma.appSetting.findUnique({ where: { key: 'absen_end_time' } });
-      const endTimeStr = endTimeSetting?.value || '17:00';
-      const [endH, endM] = endTimeStr.split(':').map(Number);
-      const now = new Date();
-      const currentMinutes = now.getHours() * 60 + now.getMinutes();
-      const endMinutes = endH * 60 + endM;
-      if (currentMinutes > endMinutes) {
-        return error(res, `The attendance window has closed. Today's deadline was ${endTimeStr} WIB`, 400);
-      }
-    }
-
-    // Feature 3: Evidence mandatory
-    if (!req.file) {
-      return error(res, "Evidence must be uploaded", 400);
-    }
-
-    const attendance = await attendanceService.submitAttendance(req.user.id, { date, status, latitude, longitude, reason });
-
-    const fileUrl = await r2Service.uploadFile(req.file, 'attendance');
-    await attendanceService.addEvidence(attendance.id, fileUrl, req.file.mimetype);
-
-    // Sync to Notion (non-blocking, per-user token)
-    const notionService = require('../services/notion.service');
-    notionService.syncAttendanceToNotion(req.user.id, attendance, req.user.name).catch(() => {});
-
-    const updated = await attendanceService.getAttendanceById(attendance.id);
+    fileUrl = await r2Service.uploadFile(req.file, 'attendance');
+    const updated = await prisma.$transaction(async tx => {
+      await tokenService.consume(faceProof, 'face', date, req.user.id, tx);
+      const attendance = await attendanceService.submitAttendance(req.user.id, { date, status, latitude, longitude, reason }, tx);
+      await tx.attendanceEvidence.create({ data: { attendanceId: attendance.id, fileUrl, fileType: req.file.mimetype } });
+      return tx.attendance.findUnique({ where: { id: attendance.id }, include: { evidences: true, user: { select: { id: true, name: true, email: true } } } });
+    }, { timeout: 15000 });
+    fileUrl = null;
+    await require('../services/notion.service').syncAttendanceToNotion(req.user.id, updated, req.user.name).catch(() => {});
     return success(res, updated, 201);
   } catch (err) {
+    if (fileUrl) await r2Service.deleteFile(fileUrl).catch(() => {});
     next(err);
   }
 }
@@ -76,12 +63,15 @@ async function getById(req, res, next) {
 }
 
 async function uploadEvidence(req, res, next) {
+  let fileUrl;
   try {
     if (!req.file) return error(res, 'File required', 400);
-    const fileUrl = await r2Service.uploadFile(req.file, 'attendance');
+    fileUrl = await r2Service.uploadFile(req.file, 'attendance');
     const evidence = await attendanceService.addEvidence(req.params.id, fileUrl, req.file.mimetype);
+    fileUrl = null;
     return success(res, evidence, 201);
   } catch (err) {
+    if (fileUrl) await r2Service.deleteFile(fileUrl).catch(() => {});
     next(err);
   }
 }

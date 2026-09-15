@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api/client';
 import Modal from '../../components/Modal';
 import { Plus, Pencil, Trash2, Search, UserPlus, Shield, GraduationCap } from 'lucide-react';
@@ -14,17 +14,21 @@ export default function Users() {
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
 
-  useEffect(() => { fetchUsers(); }, [filter, search]);
 
-  const fetchUsers = async () => {
+
+  const latestRequest = useRef({ id: 0 });
+  const fetchUsers = useCallback(async () => {
+    const requestId = ++latestRequest.current.id;
     try {
       const params = {};
       if (filter) params.role = filter;
       if (search) params.search = search;
       const res = await api.get('/users', { params });
+      if (requestId !== latestRequest.current.id) return;
       setUsers(res.data.data);
-    } catch {} finally { setLoading(false); }
-  };
+    } catch (err) { setError(err.response?.data?.error || 'Unable to load users. Please try again.'); } finally { if (requestId === latestRequest.current.id) setLoading(false); }
+  }, [filter, search]);
+  useEffect(() => { fetchUsers(); const counter = latestRequest.current; return () => { counter.id++; }; }, [fetchUsers]);
 
   const openCreate = () => { setEditUser(null); setForm({ name: '', email: '', password: '', role: 'INTERN', department: '' }); setError(''); setModalOpen(true); };
   const openEdit = (user) => { setEditUser(user); setForm({ name: user.name, email: user.email, password: '', role: user.role, department: user.department || '' }); setError(''); setModalOpen(true); };
@@ -62,6 +66,7 @@ export default function Users() {
 
   return (
     <div className="animate-fade-in-up">
+      {error && !modalOpen && <p role="alert" className="text-sm text-red-400">{error}</p>}
       <div className="page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="page-title">User Management</h1>

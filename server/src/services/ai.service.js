@@ -18,8 +18,10 @@ async function chat(messages, dbContext) {
     systemContent += '\n\n' + dbContext;
   }
 
-  const res = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+  let res;
+  try { res = await fetch(`${config.ai.baseUrl}/chat/completions`, {
     method: 'POST',
+    signal: AbortSignal.timeout(45000),
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${config.ai.apiKey}`,
@@ -33,16 +35,20 @@ async function chat(messages, dbContext) {
       temperature: 0.7,
       max_tokens: 2048,
     }),
-  });
+  }); } catch (err) {
+    const timeout = err.name === 'TimeoutError' || err.name === 'AbortError';
+    throw Object.assign(new Error(timeout ? 'AI service timed out. Please try again.' : 'AI service is unavailable. Please try again later.'), { statusCode: timeout ? 504 : 503 });
+  }
 
   if (!res.ok) {
-    const text = await res.text();
-    console.error('[AI Service] API error:', res.status, text);
-    throw Object.assign(new Error('AI API request failed'), { statusCode: 502 });
+    const message = [401,403].includes(res.status) ? 'AI credentials were rejected. Ask the administrator to check the AI configuration.' : res.status === 429 ? 'AI usage limit reached. Please try again later.' : 'AI service is unavailable. Please try again later.';
+    throw Object.assign(new Error(message), { statusCode: res.status === 429 ? 429 : 503 });
   }
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || "No response from the AI service.";
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content !== 'string' || !content.trim()) throw Object.assign(new Error('AI service returned an empty response. Please try again.'), { statusCode: 502 });
+  return content;
 }
 
 module.exports = { chat };

@@ -15,7 +15,7 @@ async function enroll(req, res, next) {
 async function verify(req, res, next) {
   try {
     if (!req.file) return error(res, 'Photo file required', 400);
-    const result = await faceService.verifyFace(req.user.id, req.file);
+    const result = await faceService.verifyFace(req.user.id, req.file, req.body.date);
     return success(res, result);
   } catch (err) {
     next(err);

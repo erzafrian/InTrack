@@ -26,12 +26,16 @@ export default function FaceEnroll() {
       const res = await getFaceStatus();
       setStatus(res.data.data);
       if (res.data.data.enrolled) setDone(true);
-    } catch {} finally { setLoading(false); }
+      else {
+        const count = Math.min(res.data.data.photoCount || 0, 14);
+        setTotalUploaded(count); setStep(Math.floor(count / PHOTOS_PER_STEP)); setPhotoIndex(count % PHOTOS_PER_STEP);
+      }
+    } catch (err) { setError(err.response?.data?.error || 'Unable to load enrollment status. Please try again.'); } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { fetchStatus(); }, [fetchStatus]);
 
-  const handleCapture = useCallback(async (file, preview) => {
+  const handleCapture = useCallback(async (file) => {
     if (!file) return;
 
     const currentStep = step;
@@ -91,7 +95,6 @@ export default function FaceEnroll() {
   }
 
   const totalPhotos = STEPS.length * PHOTOS_PER_STEP;
-  const currentGlobalPhoto = (step * PHOTOS_PER_STEP) + photoIndex + 1;
   const progressPercent = (totalUploaded / totalPhotos) * 100;
 
   return (

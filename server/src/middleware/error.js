@@ -6,9 +6,10 @@ function errorHandler(err, req, res, next) {
   if (err.code) console.error('[ERROR CODE]', err.code);
   if (err.meta) console.error('[ERROR META]', JSON.stringify(err.meta));
 
-  if (err.name === 'ValidationError' || err.code === 'P2002') {
-    return error(res, 'Validation error', 400, err.message);
-  }
+  if (err.code === 'P2002') return error(res, 'A record with these values already exists', 409);
+  if (err.code === 'P2025') return error(res, 'Record not found', 404);
+  if (err.code === 'P2003') return error(res, 'This record is linked to other data', 409);
+  if (err.name === 'ValidationError' || err.name === 'PrismaClientValidationError') return error(res, 'Invalid request data', 400);
 
   if (err.name === 'JsonWebTokenError') {
     return error(res, 'Invalid token', 401);

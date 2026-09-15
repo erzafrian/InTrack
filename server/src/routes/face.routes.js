@@ -8,8 +8,8 @@ const router = Router();
 router.use(authenticate);
 
 // Intern endpoints
-router.post('/enroll', upload.single('photo'), faceController.enroll);
-router.post('/verify', upload.single('photo'), faceController.verify);
+router.post('/enroll', upload.image('photo'), faceController.enroll);
+router.post('/verify', upload.image('photo'), faceController.verify);
 router.get('/status', faceController.status);
 
 // Mentor/Admin endpoint

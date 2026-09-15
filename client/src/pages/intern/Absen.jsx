@@ -1,6 +1,5 @@
 import { attendanceLabel } from '../../utils/presentation';
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getAttendances, submitAttendance } from '../../api/attendance';
 import { verifyFace, getFaceStatus } from '../../api/face';
 import useGeolocation from '../../hooks/useGeolocation';
@@ -28,13 +27,19 @@ export default function Absen() {
   const [faceError, setFaceError] = useState('');
   const [faceAttempts, setFaceAttempts] = useState(0);
   const [faceBlocked, setFaceBlocked] = useState(false);
+  useEffect(() => {
+    if (!faceBlocked) return;
+    const timer = setTimeout(() => { setFaceBlocked(false); setFaceAttempts(0); }, 15 * 60000);
+    return () => clearTimeout(timer);
+  }, [faceBlocked]);
   const [faceEnrolled, setFaceEnrolled] = useState(null);
+  const [attendanceHours, setAttendanceHours] = useState({ absen_start_time: '10:00', absen_end_time: '17:00' });
   const [faceResult, setFaceResult] = useState(null); // 'success' | 'fail' | null
-  const navigate = useNavigate();
   const { location, error: geoError, loading: geoLoading, requestLocation } = useGeolocation();
 
   useEffect(() => {
-    api.get('/admin/attendance/reopened').then(res => setReopenedDates(res.data.data)).catch(() => {});
+    api.get('/admin/attendance/reopened').then(res => setReopenedDates(res.data.data)).catch(() => setError('Unable to load attendance settings. Please reload.'));
+    api.get('/admin/attendance/config').then(res => setAttendanceHours(res.data.data)).catch(() => {});
     getFaceStatus().then(res => setFaceEnrolled(res.data.data?.enrolled || false)).catch(() => setFaceEnrolled(false));
   }, []);
 
@@ -67,7 +72,7 @@ export default function Absen() {
     return days;
   }, []);
 
-  const workingDays = getWorkingDays(pageOffset);
+  const workingDays = useMemo(() => getWorkingDays(pageOffset), [getWorkingDays, pageOffset]);
 
   // Local timezone date formatter (avoids UTC shift from toISOString)
   const toLocalDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -78,14 +83,14 @@ export default function Absen() {
       const endDate = toLocalDateStr(workingDays[workingDays.length - 1]);
       const res = await getAttendances({ startDate, endDate });
       setAttendances(res.data.data);
-    } catch {} finally { setLoading(false); }
+    } catch (err) { setError(err.response?.data?.error || 'Unable to load attendance. Please try again.'); } finally { setLoading(false); }
   }, [workingDays]);
 
-  useEffect(() => { setLoading(true); fetchAttendances(); }, [pageOffset]);
+  useEffect(() => { setLoading(true); fetchAttendances(); }, [fetchAttendances]);
 
   const getAttendanceForDate = (date) => {
     const dateStr = toLocalDateStr(date);
-    return attendances.find(a => toLocalDateStr(new Date(a.date)) === dateStr);
+    return attendances.find(a => a.date.slice(0, 10) === dateStr);
   };
 
   const isReopened = (date) => reopenedDates.includes(toLocalDateStr(date));
@@ -143,17 +148,17 @@ export default function Absen() {
     }
 
     if (faceBlocked) {
-      setError("Face verification failed 5 times. Contact your mentor for approval.");
+      setError("Face verification failed 5 times. Try again in 15 minutes.");
       return;
     }
 
     setFaceVerifyOpen(true);
   };
 
-  const doSubmitAttendance = async () => {
+  const doSubmitAttendance = async (faceProof) => {
     setSubmitting(true);
     try {
-      await submitAttendance({ date: toLocalDateStr(selectedDate), status, latitude: location?.latitude, longitude: location?.longitude, reason, evidence });
+      await submitAttendance({ date: toLocalDateStr(selectedDate), status, latitude: location?.latitude, longitude: location?.longitude, reason, evidence, faceProof });
       await fetchAttendances();
       setModalOpen(false); setFaceVerifyOpen(false);
       setFaceAttempts(0);
@@ -167,7 +172,7 @@ export default function Absen() {
     setFaceError('');
     setFaceResult(null);
     try {
-      const res = await verifyFace(file);
+      const res = await verifyFace(file, toLocalDateStr(selectedDate));
       const data = res.data.data;
       if (data.match) {
         setFaceResult('success');
@@ -176,7 +181,7 @@ export default function Absen() {
         await new Promise(r => setTimeout(r, 2000));
         setFaceResult(null);
         setFaceVerifyOpen(false);
-        await doSubmitAttendance();
+        await doSubmitAttendance(data.faceProof);
       } else {
         const attempts = faceAttempts + 1;
         setFaceAttempts(attempts);
@@ -187,7 +192,7 @@ export default function Absen() {
           setFaceBlocked(true);
           setFaceVerifyOpen(false);
           setFaceResult(null);
-          setError("Face verification failed 5 times. Contact your mentor for approval.");
+          setError("Face verification failed 5 times. Try again in 15 minutes.");
         } else {
           setFaceError(`Face does not match (similarity: ${(data.similarity * 100).toFixed(1)}%). Attempts remaining: ${5 - attempts}`);
           await new Promise(r => setTimeout(r, 2500));
@@ -219,12 +224,13 @@ export default function Absen() {
 
   return (
     <div className="animate-fade-in-up">
+      {error && !modalOpen && <p role="alert" className="text-sm text-red-400">{error}</p>}
       <div className="page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="page-title">Daily Attendance</h1>
           <div className="flex items-center gap-1.5 mt-1">
             <Clock size={14} style={{ color: 'var(--color-text-muted)' }} />
-            <p className="page-subtitle">10.00 - 17.00 WIB</p>
+            <p className="page-subtitle">{attendanceHours.absen_start_time} - {attendanceHours.absen_end_time} WIB</p>
           </div>
         </div>
         <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>

@@ -1,7 +1,9 @@
 const dotenv = require('dotenv');
 const path = require('path');
 
+// Keep deployment/server overrides, then fall back to the shared project .env.
 dotenv.config({ path: path.join(__dirname, '../../.env') });
+dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 module.exports = {
   port: parseInt(process.env.PORT || '3000', 10),
@@ -26,13 +28,13 @@ module.exports = {
   notion: {
     clientId: process.env.NOTION_CLIENT_ID,
     clientSecret: process.env.NOTION_CLIENT_SECRET,
-    redirectUri: process.env.NOTION_REDIRECT_URI || 'http://localhost:3000/api/auth/notion/callback',
+    redirectUri: process.env.NOTION_REDIRECT_URI || 'http://localhost:3001/api/auth/notion/callback',
   },
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/api/auth/google/callback',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3001/api/google/callback',
   },
 
   office: {

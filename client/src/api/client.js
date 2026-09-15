@@ -1,40 +1,18 @@
 import axios from 'axios';
-
-const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
-  withCredentials: true,
-  headers: { 'Content-Type': 'application/json' },
-});
-
-let isRefreshing = false;
-
-api.interceptors.response.use(
-  (res) => res,
-  async (error) => {
-    const originalRequest = error.config;
-
-    // Skip refresh for auth endpoints to prevent infinite loop
-    if (originalRequest.url?.includes('/auth/')) {
-      return Promise.reject(error);
-    }
-
-    if (error.response?.status === 401 && !originalRequest._retry && !isRefreshing) {
-      originalRequest._retry = true;
-      isRefreshing = true;
-      try {
-        const refreshUrl = (import.meta.env.VITE_API_URL || '/api') + '/auth/refresh';
-        await axios.post(refreshUrl, {}, { withCredentials: true });
-        isRefreshing = false;
-        return api(originalRequest);
-      } catch {
-        isRefreshing = false;
-        window.location.href = '/login';
-        return Promise.reject(error);
-      }
-    }
-
-    return Promise.reject(error);
+const baseURL = import.meta.env.VITE_API_URL || '/api';
+const api = axios.create({ baseURL, withCredentials: true, headers: { 'Content-Type': 'application/json' } });
+let refreshPromise = null;
+api.interceptors.response.use(res => res, async error => {
+  const request = error.config;
+  if (!request || error.response?.status !== 401 || request._retry || /\/auth\/(login|refresh)(?:$|[?])/.test(request.url || '')) return Promise.reject(error);
+  request._retry = true;
+  if (!refreshPromise) {
+    refreshPromise = axios.post(baseURL + '/auth/refresh', {}, { withCredentials: true }).finally(() => { refreshPromise = null; });
   }
-);
-
+  try { await refreshPromise; } catch (refreshError) {
+    if (refreshError.response?.status === 401) window.dispatchEvent(new Event('auth-expired'));
+    return Promise.reject(refreshError);
+  }
+  return api(request);
+});
 export default api;

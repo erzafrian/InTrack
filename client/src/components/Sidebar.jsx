@@ -1,6 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/auth';
 import { LogOut, Menu, X, Pencil, Camera } from 'lucide-react';
 import api from '../api/client';
 import Modal from './Modal';
@@ -105,7 +105,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
 
       {/* Nav */}
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-secondary px-3 py-2">Menu</p>
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-text-secondary px-3 py-2">Menu</p>
         {getLinks().map(({ to, label }) => (
           <NavLink
             key={to}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { getPlannerEvents, createPlannerEvent, deletePlannerEvent, getGoogleStatus, getGoogleAuthUrl, disconnectGoogle } from '../../api/planner';
 import Modal from '../../components/Modal';
+import { toLocalDateKey, fromLocalDateKey, shiftCalendarMonth } from '../../utils/calendarDate';
 import { Plus, Trash2, ChevronLeft, ChevronRight, CalendarDays, Clock, Link2, Unlink, CheckCircle2, ExternalLink } from 'lucide-react';
 
 function GoogleIcon({ size = 16, ...props }) {
@@ -17,8 +18,9 @@ function GoogleIcon({ size = 16, ...props }) {
 
 export default function Planner() {
   const [events, setEvents] = useState([]);
+  const [pageError, setPageError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey());
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState({ title: '', startDate: '', startTime: '10:00', endDate: '', endTime: '17:00', allDay: false, description: '' });
   const [submitting, setSubmitting] = useState(false);
@@ -35,13 +37,14 @@ export default function Planner() {
       setGoogleConnected(true);
       setSearchParams({}, { replace: true });
     } else if (g === 'error') {
+      setPageError('Calendar authorization failed. Please connect again.');
       setSearchParams({}, { replace: true });
     }
-  }, [searchParams]);
+  }, [searchParams, setSearchParams]);
 
   const fetchEvents = async () => {
     try { const res = await getPlannerEvents(); setEvents(res.data.data); }
-    catch {} finally { setLoading(false); }
+    catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update planner. Please try again.'); } finally { setLoading(false); }
   };
 
   const checkGoogleStatus = async () => {
@@ -59,7 +62,7 @@ export default function Planner() {
 
   const handleGoogleDisconnect = async () => {
     if (!confirm("Disconnect Google Calendar? Previously synced events will remain.")) return;
-    try { await disconnectGoogle(); setGoogleConnected(false); } catch {}
+    try { await disconnectGoogle(); setGoogleConnected(false); } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update planner. Please try again.'); }
   };
 
   const openNewEvent = () => {
@@ -68,26 +71,26 @@ export default function Planner() {
   };
 
   const handleCreate = async () => {
-    if (!form.title) return;
+    if (!form.title.trim() || !form.startDate || !form.endDate || form.endDate < form.startDate || (!form.allDay && form.endDate === form.startDate && form.endTime <= form.startTime)) { setPageError('End date/time must be later than start.'); return; }
     setSubmitting(true);
     try {
-      const startDate = form.allDay ? `${form.startDate}T00:00:00` : `${form.startDate}T${form.startTime}:00`;
-      const endDate = form.allDay ? `${form.endDate}T23:59:59` : `${form.endDate}T${form.endTime}:00`;
+      const startDate = form.allDay ? `${form.startDate}T00:00:00+07:00` : `${form.startDate}T${form.startTime}:00+07:00`;
+      const endDate = form.allDay ? `${form.endDate}T23:59:59+07:00` : `${form.endDate}T${form.endTime}:00+07:00`;
       await createPlannerEvent({ title: form.title, startDate, endDate, allDay: form.allDay, description: form.description });
-      setModalOpen(false); fetchEvents();
-    } catch (err) { console.error(err); }
+      setPageError(''); setModalOpen(false); fetchEvents();
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to save changes. Please try again.'); }
     finally { setSubmitting(false); }
   };
 
   const handleDelete = async (id) => {
     if (!confirm("Delete this event?")) return;
-    try { await deletePlannerEvent(id); fetchEvents(); } catch {}
+    try { await deletePlannerEvent(id); fetchEvents(); } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update planner. Please try again.'); }
   };
 
-  const getEventsForDate = (dateStr) => events.filter(e => { const s = e.startDate?.split('T')[0]; const en = e.endDate?.split('T')[0]; return dateStr >= s && dateStr <= en; });
+  const getEventsForDate = (dateStr) => events.filter(e => { const s = e.startDate ? new Date(e.startDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : ''; const en = e.endDate ? new Date(e.endDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : ''; return dateStr >= s && dateStr <= en; });
 
   const getDaysInMonth = () => {
-    const d = new Date(selectedDate);
+    const d = fromLocalDateKey(selectedDate);
     const year = d.getFullYear(); const month = d.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -97,14 +100,16 @@ export default function Planner() {
     return days;
   };
 
-  const monthLabel = () => new Date(selectedDate).toLocaleDateString("en-GB", { month: 'long', year: 'numeric' });
-  const changeMonth = (d) => { const dt = new Date(selectedDate); dt.setMonth(dt.getMonth() + d); setSelectedDate(dt.toISOString().split('T')[0]); };
+  const monthLabel = () => fromLocalDateKey(selectedDate).toLocaleDateString("en-GB", { month: 'long', year: 'numeric' });
+  const changeMonth = (offset) => setSelectedDate(date => shiftCalendarMonth(date, offset));
+  const today = toLocalDateKey();
   const todayEvents = getEventsForDate(selectedDate);
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="spinner" /></div>;
 
   return (
     <div className="animate-fade-in-up">
+      {pageError && <p role="alert" className="mb-3 text-sm text-red-400">{pageError}</p>}
       <div className="page-header flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="page-title">Planner</h1>
@@ -142,12 +147,15 @@ export default function Planner() {
             ))}
             {getDaysInMonth().map((day, i) => {
               if (!day) return <div key={`e-${i}`} />;
-              const dateStr = day.toISOString().split('T')[0];
+              const dateStr = toLocalDateKey(day);
               const isSelected = dateStr === selectedDate;
-              const isToday = dateStr === new Date().toISOString().split('T')[0];
+              const isToday = dateStr === today;
               const hasEvents = getEventsForDate(dateStr).length > 0;
               return (
                 <button key={dateStr} onClick={() => setSelectedDate(dateStr)}
+                  aria-label={dateStr}
+                  aria-pressed={isSelected}
+                  aria-current={isToday ? 'date' : undefined}
                   className="relative p-1.5 sm:p-2 rounded-xl text-sm transition-all cursor-pointer hover:bg-surface-hover"
                   style={isSelected ? { background: 'var(--color-primary)', color: 'var(--color-text-inverse)', fontWeight: 600, boxShadow: 'var(--shadow-panel-hover)' }
                     : isToday ? { background: 'var(--color-primary-100)', color: 'var(--color-primary)', fontWeight: 600 }
@@ -165,7 +173,7 @@ export default function Planner() {
         <div>
           <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
             <CalendarDays size={14} />
-            {new Date(selectedDate + 'T00:00:00').toLocaleDateString("en-GB", { weekday: 'short', day: 'numeric', month: 'long' })}
+            {fromLocalDateKey(selectedDate).toLocaleDateString("en-GB", { weekday: 'short', day: 'numeric', month: 'long' })}
           </h3>
           {todayEvents.length === 0 ? (
             <div className="card empty-state py-8">
@@ -204,6 +212,7 @@ export default function Planner() {
       </div>
 
       <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title="Add Event">
+          {pageError && <p role="alert" className="text-sm text-red-400">{pageError}</p>}
         <div className="space-y-4">
           <div><label className="label">Title</label><input value={form.title} onChange={(e) => setForm(p => ({ ...p, title: e.target.value }))} placeholder="Event name" className="input" autoFocus /></div>
           <div className="grid grid-cols-2 gap-3">

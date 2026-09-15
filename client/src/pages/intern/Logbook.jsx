@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getLogbookEntries, createLogbookEntry, addLogbookTask, deleteLogbookTask } from '../../api/logbook';
 import Modal from '../../components/Modal';
 import FileUpload from '../../components/FileUpload';
+import { toLocalDateKey, fromLocalDateKey } from '../../utils/calendarDate';
 import { Plus, Trash2, Clock, Paperclip, ExternalLink, BookOpen, BarChart3, MessageSquareText, PackageCheck, Download } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function Logbook() {
-  const [entries, setEntries] = useState([]);
+  const [pageError, setPageError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => toLocalDateKey());
   const [currentEntry, setCurrentEntry] = useState(null);
   const [taskModal, setTaskModal] = useState(false);
   const [taskForm, setTaskForm] = useState({ timeStart: '10:00', timeEnd: '13:00', quantitativeActivity: '', qualitativeActivity: '', output: '' });
@@ -19,30 +20,35 @@ export default function Logbook() {
   // For PDF download — fetch all entries for this month
   const [allEntries, setAllEntries] = useState([]);
 
-  useEffect(() => { fetchEntry(); }, [selectedDate]);
+
   useEffect(() => { fetchAllEntries(); }, []);
 
-  const fetchEntry = async () => {
+  const latestRequest = useRef({ id: 0 });
+  const fetchEntry = useCallback(async () => {
+    const requestId = ++latestRequest.current.id;
+    setCurrentEntry(null); setPageError('');
     setLoading(true);
     try {
       const res = await getLogbookEntries({ startDate: selectedDate, endDate: selectedDate });
       const data = res.data.data;
+      if (requestId !== latestRequest.current.id) return;
       setCurrentEntry(data.length > 0 ? data[0] : null);
-    } catch {} finally { setLoading(false); }
-  };
+    } catch (err) { if (requestId === latestRequest.current.id) setPageError(err.response?.data?.error || 'Unable to load logbook. Please try again.'); } finally { if (requestId === latestRequest.current.id) setLoading(false); }
+  }, [selectedDate]);
+  useEffect(() => { fetchEntry(); const counter = latestRequest.current; return () => { counter.id++; }; }, [fetchEntry]);
 
   const fetchAllEntries = async () => {
     try {
       const now = new Date();
-      const startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      const endDate = now.toISOString().split('T')[0];
+      const startDate = toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
+      const endDate = toLocalDateKey(now);
       const res = await getLogbookEntries({ startDate, endDate });
       setAllEntries(res.data.data);
-    } catch {}
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load logbook. Please try again.'); }
   };
 
   const handleCreateEntry = async () => {
-    try { const res = await createLogbookEntry(selectedDate); setCurrentEntry(res.data.data); } catch (err) { console.error(err); }
+    try { const res = await createLogbookEntry(selectedDate); setCurrentEntry(res.data.data); } catch (err) { setPageError(err.response?.data?.error || 'Unable to update logbook. Please try again.'); }
   };
 
   const handleAddTask = async () => {
@@ -54,17 +60,17 @@ export default function Logbook() {
       setTaskForm({ timeStart: '10:00', timeEnd: '13:00', quantitativeActivity: '', qualitativeActivity: '', output: '' });
       setTaskEvidence(null);
       fetchEntry(); fetchAllEntries();
-    } catch (err) { console.error(err); }
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to update logbook. Please try again.'); }
     finally { setSubmitting(false); }
   };
 
   const handleDeleteTask = async (taskId) => {
     if (!confirm("Delete this task?")) return;
-    try { await deleteLogbookTask(taskId); fetchEntry(); fetchAllEntries(); } catch (err) { console.error(err); }
+    try { await deleteLogbookTask(taskId); fetchEntry(); fetchAllEntries(); } catch (err) { setPageError(err.response?.data?.error || 'Unable to update logbook. Please try again.'); }
   };
 
   const formatDateDisplay = (dateStr) => {
-    const d = new Date(dateStr + 'T00:00:00');
+    const d = fromLocalDateKey(dateStr);
     return d.toLocaleDateString("en-GB", { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
 
@@ -83,7 +89,7 @@ export default function Logbook() {
 
     const tableData = [];
     allEntries.forEach(entry => {
-      const dateStr = new Date(entry.date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short', year: 'numeric' });
+      const dateStr = fromLocalDateKey(entry.date.split('T')[0]).toLocaleDateString("en-GB", { day: 'numeric', month: 'short', year: 'numeric' });
       if (entry.tasks?.length > 0) {
         entry.tasks.forEach(task => {
           tableData.push([
@@ -120,6 +126,7 @@ export default function Logbook() {
 
   return (
     <div className="animate-fade-in-up">
+      {pageError && <p role="alert" className="text-sm text-red-400">{pageError}</p>}
       <div className="page-header flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="page-title">Logbook</h1>
@@ -129,7 +136,7 @@ export default function Logbook() {
           <button onClick={downloadPDF} className="btn btn-secondary" title="Download PDF">
             <Download size={15} /> PDF
           </button>
-          <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} className="input w-full sm:w-auto" />
+          <input type="date" value={selectedDate} onChange={(e) => { if (e.target.value) setSelectedDate(e.target.value); }} className="input w-full sm:w-auto" />
         </div>
       </div>
 
@@ -223,6 +230,7 @@ export default function Logbook() {
       )}
 
       <Modal isOpen={taskModal} onClose={() => setTaskModal(false)} title="Add Task">
+          {pageError && <p role="alert" className="text-sm text-red-400">{pageError}</p>}
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-3">
             <div>

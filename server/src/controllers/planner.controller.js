@@ -1,15 +1,26 @@
+const { badRequest } = require('../utils/validation');
+const { parseDateOnly } = require('../utils/dateOnly');
+function parseEventTime(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) throw badRequest('Date and time are required');
+  parseDateOnly(value.slice(0,10));
+  if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:[zZ]|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.test(value)) throw badRequest('Invalid event time');
+  const date = new Date(/[zZ]$|[+-]\d{2}:\d{2}$/.test(value) ? value : value + '+07:00');
+  if (!Number.isFinite(date.getTime())) throw badRequest('Invalid event date');
+  return date;
+}
 const plannerService = require('../services/planner.service');
 const { success, error } = require('../utils/response');
 
 async function create(req, res, next) {
   try {
     const { title, startDate, endDate, allDay, description } = req.body;
+    if (allDay !== undefined && typeof allDay !== 'boolean') throw badRequest('allDay must be a boolean');
     if (!title || !startDate || !endDate) return error(res, 'title, startDate, endDate required', 400);
 
     const event = await plannerService.createEvent(req.user.id, {
       title,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
+      startDate: parseEventTime(startDate),
+      endDate: parseEventTime(endDate),
       allDay: allDay || false,
       description,
     });
@@ -30,10 +41,11 @@ async function getAll(req, res, next) {
 
 async function update(req, res, next) {
   try {
+    if (req.body.allDay !== undefined && typeof req.body.allDay !== 'boolean') throw badRequest('allDay must be a boolean');
     const data = {};
-    if (req.body.title) data.title = req.body.title;
-    if (req.body.startDate) data.startDate = new Date(req.body.startDate);
-    if (req.body.endDate) data.endDate = new Date(req.body.endDate);
+    if (req.body.title !== undefined) data.title = req.body.title;
+    if (req.body.startDate) data.startDate = parseEventTime(req.body.startDate);
+    if (req.body.endDate) data.endDate = parseEventTime(req.body.endDate);
     if (req.body.allDay !== undefined) data.allDay = req.body.allDay;
     if (req.body.description !== undefined) data.description = req.body.description;
 

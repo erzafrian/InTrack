@@ -1,7 +1,11 @@
+const { dayStart, nextDate } = require('../utils/operationalTime');
+const { badRequest } = require('../utils/validation');
+function validateEvent(data) { if (typeof data.title !== 'string' || !data.title.trim() || !Number.isFinite(data.startDate?.getTime()) || !Number.isFinite(data.endDate?.getTime()) || data.endDate <= data.startDate) throw badRequest('Use a title and an end date/time later than the start.'); }
 const { prisma } = require('../middleware/auth');
 const googleService = require('./google.service');
 
 async function createEvent(userId, data) {
+  validateEvent(data);
   const event = await prisma.plannerEvent.create({
     data: { userId, ...data },
   });
@@ -28,11 +32,9 @@ async function getEvents(userId, role, query) {
     where.userId = targetUserId;
   }
 
-  if (startDate || endDate) {
-    where.startDate = {};
-    if (startDate) where.startDate.gte = new Date(startDate);
-    if (endDate) where.startDate.lte = new Date(endDate);
-  }
+  if (startDate) where.endDate = { gte: dayStart(startDate) };
+  if (endDate) where.startDate = { lt: dayStart(nextDate(endDate)) };
+  if (startDate && endDate && endDate < startDate) throw badRequest('End date must not precede start date');
 
   return prisma.plannerEvent.findMany({
     where,
@@ -44,7 +46,10 @@ async function getEvents(userId, role, query) {
 async function updateEvent(id, userId, data) {
   const event = await prisma.plannerEvent.findUnique({ where: { id } });
   if (!event || event.userId !== userId) return null;
-  return prisma.plannerEvent.update({ where: { id }, data });
+  validateEvent({ ...event, ...data });
+  const updated = await prisma.plannerEvent.update({ where: { id }, data });
+  const gcalEventId = await googleService.syncEventToCalendar(userId, updated);
+  return gcalEventId ? prisma.plannerEvent.update({ where: { id }, data: { gcalEventId } }) : updated;
 }
 
 async function deleteEvent(id, userId) {

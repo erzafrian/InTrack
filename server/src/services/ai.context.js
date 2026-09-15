@@ -1,3 +1,4 @@
+const { todayKey } = require('../utils/operationalTime');
 const { prisma } = require('../middleware/auth');
 const statusLabels = { HADIR: 'Present', IZIN: 'On Leave', SAKIT: 'Sick' };
 
@@ -7,7 +8,7 @@ async function buildContext(userId) {
 
   const lines = ['--- REAL-TIME INTRACK DATABASE CONTEXT ---'];
   const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
+  const todayStr = todayKey(today);
   const monthAgo = new Date(today);
   monthAgo.setDate(monthAgo.getDate() - 30);
 

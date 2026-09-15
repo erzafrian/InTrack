@@ -9,8 +9,8 @@ async function login(req, res, next) {
 
     const result = await authService.login(email, password, !!rememberMe);
 
-    const accessMaxAge = rememberMe ? 30 * 24 * 60 * 60 * 1000 : 15 * 60 * 1000;
-    const refreshMaxAge = rememberMe ? 90 * 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000;
+    const accessMaxAge = result.accessMaxAge;
+    const refreshMaxAge = result.refreshMaxAge;
 
     res.cookie('accessToken', result.accessToken, {
       ...authCookieOptions(req),
@@ -28,7 +28,8 @@ async function login(req, res, next) {
   }
 }
 
-async function logout(req, res) {
+async function logout(req, res, next) {
+  try { await authService.logout(req.user.sessionId); } catch (err) { return next(err); }
   res.clearCookie('accessToken', authCookieOptions(req));
   res.clearCookie('refreshToken', authCookieOptions(req));
   return success(res, { message: 'Logged out' });
@@ -46,30 +47,16 @@ async function me(req, res, next) {
 
 async function refresh(req, res, next) {
   try {
-    const jwt = require('jsonwebtoken');
-    const config = require('../config/env');
-    const token = req.cookies?.refreshToken;
-    if (!token) return error(res, 'Refresh token required', 401);
-
-    const decoded = jwt.verify(token, config.jwt.secret);
-    const user = await authService.getUserById(decoded.id);
-    if (!user) return error(res, 'User not found', 404);
-
-    const payload = { id: user.id, name: user.name, email: user.email, role: user.role };
-    const accessToken = jwt.sign(payload, config.jwt.secret, { expiresIn: config.jwt.expiresIn });
-
-    res.cookie('accessToken', accessToken, {
-      ...authCookieOptions(req),
-      maxAge: 15 * 60 * 1000,
-    });
-
-    return success(res, payload);
-  } catch (err) {
-    next(err);
-  }
+    const result = await authService.refresh(req.cookies?.refreshToken);
+    res.cookie('accessToken', result.accessToken, { ...authCookieOptions(req), maxAge: result.accessMaxAge });
+    res.cookie('refreshToken', result.refreshToken, { ...authCookieOptions(req), maxAge: result.refreshMaxAge });
+    return success(res, result.user);
+  } catch (err) { next(err); }
 }
 
 async function updateProfile(req, res, next) {
+  const r2Service = require('../services/r2.service');
+  let uploadedUrl;
   try {
     const { prisma } = require('../middleware/auth');
     const data = {};
@@ -78,8 +65,8 @@ async function updateProfile(req, res, next) {
 
     // Handle avatar upload
     if (req.file) {
-      const r2Service = require('../services/r2.service');
       const url = await r2Service.uploadFile(req.file, 'avatars');
+      uploadedUrl = url;
       if (url) data.avatarUrl = url;
     }
 
@@ -88,8 +75,10 @@ async function updateProfile(req, res, next) {
       data,
       select: { id: true, name: true, email: true, role: true, department: true, avatarUrl: true },
     });
+    uploadedUrl = null;
     return success(res, user);
   } catch (err) {
+    if (uploadedUrl) await r2Service.deleteFile(uploadedUrl).catch(() => {});
     next(err);
   }
 }

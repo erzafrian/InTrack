@@ -1,20 +1,21 @@
 const { prisma } = require('../middleware/auth');
 const { calculateDistance } = require('../utils/geo');
-const config = require('../config/env');
+const { parseDateOnly } = require('../utils/dateOnly');
+const { getSettings } = require('./settings.service');
 
-async function submitAttendance(userId, data) {
+async function submitAttendance(userId, data, tx = prisma) {
   const { date, status, latitude, longitude, reason } = data;
-  // Store at UTC noon — can never flip to a different calendar day in any timezone
-  const attendanceDate = new Date(`${date}T12:00:00Z`);
+  const attendanceDate = parseDateOnly(date);
 
   let distanceKm = null;
   const lat = latitude != null ? parseFloat(latitude) : null;
   const lng = longitude != null ? parseFloat(longitude) : null;
-  if (lat && lng) {
-    distanceKm = calculateDistance(config.office.latitude, config.office.longitude, lat, lng);
+  if (lat !== null && lng !== null) {
+    const settings = await getSettings(tx);
+    distanceKm = calculateDistance(Number(settings.office_latitude), Number(settings.office_longitude), lat, lng);
   }
 
-  return prisma.attendance.upsert({
+  return tx.attendance.upsert({
     where: { userId_date: { userId, date: attendanceDate } },
     create: {
       userId,
@@ -43,8 +44,9 @@ async function getAttendances(userId, role, query) {
 
   if (startDate || endDate) {
     where.date = {};
-    if (startDate) where.date.gte = new Date(startDate);
-    if (endDate) where.date.lte = new Date(endDate);
+    if (startDate) where.date.gte = parseDateOnly(startDate);
+    if (endDate) where.date.lte = parseDateOnly(endDate);
+    if (startDate && endDate && startDate > endDate) throw Object.assign(new Error('End date must not precede start date'), { statusCode: 400 });
   }
 
   return prisma.attendance.findMany({

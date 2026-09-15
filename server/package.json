@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "db:push": "npx prisma db push",
+    "db:push": "node -r ./src/config/env.js ./node_modules/prisma/build/index.js db push",
     "db:seed": "node prisma/seed.js",
-    "db:studio": "npx prisma studio",
-    "db:generate": "npx prisma generate",
+    "db:studio": "node -r ./src/config/env.js ./node_modules/prisma/build/index.js studio",
+    "db:generate": "node -r ./src/config/env.js ./node_modules/prisma/build/index.js generate",
+    "db:migrate": "node -r ./src/config/env.js ./node_modules/prisma/build/index.js migrate deploy",
     "postinstall": "npx prisma generate"
   },
   "dependencies": {

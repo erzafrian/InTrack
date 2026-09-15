@@ -1,3 +1,5 @@
+import { createElement } from 'react';
+import { toLocalDateKey } from '../../utils/calendarDate';
 import { attendanceLabel } from '../../utils/presentation';
 import { useState, useEffect } from 'react';
 import api from '../../api/client';
@@ -12,7 +14,7 @@ export default function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = toLocalDateKey();
       const [usersRes, attendanceRes] = await Promise.all([
         api.get('/users', { params: { role: 'INTERN' } }),
         api.get('/attendance', { params: { startDate: today, endDate: today } }),
@@ -55,7 +57,7 @@ export default function Dashboard() {
         {statCards.map(({ label, value, Icon, color, bg }) => (
           <div key={label} className="stat-card animate-fade-in-up">
             <div className="stat-icon" style={{ background: bg }}>
-              <Icon size={18} style={{ color }} />
+              {createElement(Icon, { size: 18, style: { color } })}
             </div>
             <div>
               <p className="text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>{label}</p>

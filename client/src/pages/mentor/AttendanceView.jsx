@@ -1,51 +1,58 @@
 import { attendanceLabel } from '../../utils/presentation';
-import { useState, useEffect } from 'react';
+import { toLocalDateKey } from '../../utils/calendarDate';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api/client';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/auth';
 import { Filter, CheckCircle2, FileText, Thermometer, MapPin, Clock, Unlock, Lock } from 'lucide-react';
 
 export default function AttendanceView() {
   const { user } = useAuth();
+  const [pageError, setPageError] = useState('');
   const [interns, setInterns] = useState([]);
   const [selectedIntern, setSelectedIntern] = useState('');
   const [attendances, setAttendances] = useState([]);
   const [loading, setLoading] = useState(false);
   const [reopenedDates, setReopenedDates] = useState([]);
-  const [dateRange, setDateRange] = useState({
-    startDate: '2026-02-23',
-    endDate: new Date().toISOString().split('T')[0],
+  const [dateRange, setDateRange] = useState(() => {
+    const today = toLocalDateKey();
+    return { startDate: today, endDate: today };
   });
 
-  useEffect(() => { api.get('/users', { params: { role: 'INTERN' } }).then(res => setInterns(res.data.data)); }, []);
-  useEffect(() => { fetchAttendances(); }, [selectedIntern, dateRange]);
+  useEffect(() => { api.get('/users', { params: { role: 'INTERN' } }).then(res => setInterns(res.data.data)).catch(() => setPageError('Unable to load interns. Please reload.')); }, []);
+
   useEffect(() => { fetchReopenedDates(); }, []);
 
   const fetchReopenedDates = async () => {
-    try { const res = await api.get('/admin/attendance/reopened'); setReopenedDates(res.data.data); } catch {}
+    try { const res = await api.get('/admin/attendance/reopened'); setReopenedDates(res.data.data); } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); }
   };
 
-  const fetchAttendances = async () => {
+  const latestRequest = useRef({ id: 0 });
+  const fetchAttendances = useCallback(async () => {
+    const requestId = ++latestRequest.current.id;
+    setAttendances([]); setPageError('');
     setLoading(true);
     try {
       const params = { ...dateRange };
       if (selectedIntern) params.targetUserId = selectedIntern;
       const res = await api.get('/attendance', { params });
+      if (requestId !== latestRequest.current.id) return;
       setAttendances(res.data.data);
-    } catch {} finally { setLoading(false); }
-  };
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); } finally { if (requestId === latestRequest.current.id) setLoading(false); }
+  }, [selectedIntern, dateRange]);
+  useEffect(() => { fetchAttendances(); const counter = latestRequest.current; return () => { counter.id++; }; }, [fetchAttendances]);
 
   const handleReopen = async (dateStr) => {
     try {
       await api.post('/admin/attendance/reopen', { date: dateStr });
       fetchReopenedDates();
-    } catch {}
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); }
   };
 
   const handleClose = async (dateStr) => {
     try {
       await api.delete('/admin/attendance/reopen', { data: { date: dateStr } });
       fetchReopenedDates();
-    } catch {}
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); }
   };
 
   const handleBulkReopen = async () => {
@@ -55,7 +62,7 @@ export default function AttendanceView() {
     try {
       await api.post('/admin/attendance/reopen-bulk', { dates: closedDates });
       fetchReopenedDates();
-    } catch {}
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); }
   };
 
   const handleBulkClose = async () => {
@@ -65,11 +72,11 @@ export default function AttendanceView() {
     try {
       await api.post('/admin/attendance/close-bulk', { dates: openDates });
       fetchReopenedDates();
-    } catch {}
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update attendance. Please try again.'); }
   };
 
   const isAdmin = user?.role === 'SUPERUSER';
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = toLocalDateKey();
 
   // Generate list of workdays in the date range for the reopen feature
   const getWorkdays = () => {
@@ -78,18 +85,19 @@ export default function AttendanceView() {
     const end = new Date(dateRange.endDate);
     const d = new Date(start);
     while (d <= end) {
-      const dow = d.getDay();
+      const dow = d.getUTCDay();
       if (dow !== 0 && dow !== 6) {
         const ds = d.toISOString().split('T')[0];
         if (ds <= todayStr) days.push(ds);
       }
-      d.setDate(d.getDate() + 1);
+      d.setUTCDate(d.getUTCDate() + 1);
     }
     return days;
   };
 
   return (
     <div className="animate-fade-in-up">
+      {pageError && <p role="alert" className="text-sm text-red-400">{pageError}</p>}
       <div className="page-header">
         <h1 className="page-title">Intern Attendance</h1>
         <p className="page-subtitle">View attendance history for all interns</p>

@@ -55,10 +55,14 @@ async function update(req, res, next) {
     if (mentorId !== undefined) data.mentorId = mentorId;
     if (password) data.passwordHash = await bcrypt.hash(password, 12);
 
-    const user = await prisma.user.update({
+    const user = await prisma.$transaction(async tx => {
+      const updated = await tx.user.update({
       where: { id: req.params.id },
       data,
       select: { id: true, name: true, email: true, role: true, department: true, createdAt: true },
+      });
+      if (password || role) await tx.authSession.deleteMany({ where: { userId: req.params.id } });
+      return updated;
     });
     return success(res, user);
   } catch (err) {
@@ -70,31 +74,35 @@ async function remove(req, res, next) {
   try {
     const userId = req.params.id;
 
+    if (userId === req.user.id) return error(res, 'You cannot delete your own account', 400);
+    await prisma.$transaction(async tx => {
+    if (await tx.user.count({ where: { mentorId: userId } })) throw Object.assign(new Error("Reassign this mentor's interns before deleting the account"), { statusCode: 409 });
     // Cascade delete related records
     // Delete attendance evidences first (via attendance IDs)
-    const attendances = await prisma.attendance.findMany({ where: { userId }, select: { id: true } });
+    const attendances = await tx.attendance.findMany({ where: { userId }, select: { id: true } });
     const attendanceIds = attendances.map(a => a.id);
     if (attendanceIds.length > 0) {
-      await prisma.attendanceEvidence.deleteMany({ where: { attendanceId: { in: attendanceIds } } });
-      await prisma.externalSync.deleteMany({ where: { entityId: { in: attendanceIds } } });
+      await tx.attendanceEvidence.deleteMany({ where: { attendanceId: { in: attendanceIds } } });
+      await tx.externalSync.deleteMany({ where: { entityId: { in: attendanceIds } } });
     }
-    await prisma.attendance.deleteMany({ where: { userId } });
+    await tx.attendance.deleteMany({ where: { userId } });
 
     // Delete logbook tasks (via entry IDs)
-    const entries = await prisma.logbookEntry.findMany({ where: { userId }, select: { id: true } });
+    const entries = await tx.logbookEntry.findMany({ where: { userId }, select: { id: true } });
     const entryIds = entries.map(e => e.id);
     if (entryIds.length > 0) {
-      await prisma.logbookTask.deleteMany({ where: { entryId: { in: entryIds } } });
+      await tx.logbookTask.deleteMany({ where: { entryId: { in: entryIds } } });
     }
-    await prisma.logbookEntry.deleteMany({ where: { userId } });
+    await tx.logbookEntry.deleteMany({ where: { userId } });
 
     // Delete other related records
-    await prisma.plannerEvent.deleteMany({ where: { userId } });
-    await prisma.faceEmbedding.deleteMany({ where: { userId } });
-    await prisma.chatRoom.deleteMany({ where: { userId } });
+    await tx.plannerEvent.deleteMany({ where: { userId } });
+    await tx.faceEmbedding.deleteMany({ where: { userId } });
+    await tx.chatRoom.deleteMany({ where: { userId } });
 
     // Finally delete the user
-    await prisma.user.delete({ where: { id: userId } });
+    await tx.user.delete({ where: { id: userId } });
+    }, { timeout: 15000 });
     return success(res, { message: 'User deleted' });
   } catch (err) {
     next(err);

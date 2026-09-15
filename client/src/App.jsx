@@ -1,19 +1,20 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/auth';
 import ProtectedRoute from './components/ProtectedRoute';
 import Sidebar, { MobileHeader } from './components/Sidebar';
 import Login from './pages/Login';
-import Absen from './pages/intern/Absen';
-import Logbook from './pages/intern/Logbook';
-import Planner from './pages/intern/Planner';
-import FaceEnroll from './pages/intern/FaceEnroll';
-import Dashboard from './pages/mentor/Dashboard';
-import AttendanceView from './pages/mentor/AttendanceView';
-import AiChat from './pages/mentor/AiChat';
-import InternProgress from './pages/mentor/InternProgress';
-import Users from './pages/admin/Users';
-import Settings from './pages/admin/Settings';
+const Absen = lazy(() => import('./pages/intern/Absen'));
+const Logbook = lazy(() => import('./pages/intern/Logbook'));
+const Planner = lazy(() => import('./pages/intern/Planner'));
+const FaceEnroll = lazy(() => import('./pages/intern/FaceEnroll'));
+const Dashboard = lazy(() => import('./pages/mentor/Dashboard'));
+const AttendanceView = lazy(() => import('./pages/mentor/AttendanceView'));
+const AiChat = lazy(() => import('./pages/mentor/AiChat'));
+const InternProgress = lazy(() => import('./pages/mentor/InternProgress'));
+const Users = lazy(() => import('./pages/admin/Users'));
+const Settings = lazy(() => import('./pages/admin/Settings'));
 
 function AppLayout({ children }) {
 
@@ -52,6 +53,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="spinner" /></div>}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<HomeRedirect />} />
@@ -67,6 +69,7 @@ export default function App() {
           <Route path="/admin/settings" element={<ProtectedRoute roles={['SUPERUSER']}><AppLayout><Settings /></AppLayout></ProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </AuthProvider>
     </BrowserRouter>
   );

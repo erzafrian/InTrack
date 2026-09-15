@@ -1,17 +1,20 @@
+import { createElement } from 'react';
 import { attendanceLabel } from '../../utils/presentation';
-import { useState, useEffect } from 'react';
+import { toLocalDateKey, fromLocalDateKey } from '../../utils/calendarDate';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api/client';
 import { Users, CalendarDays, BookOpen, ClipboardList, ChevronDown, ChevronUp, Clock, Check, FileText, Thermometer, MapPin, BarChart3, MessageSquareText, PackageCheck, ExternalLink, Search, Download, ScanFace, RotateCcw } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function InternProgress() {
+  const [pageError, setPageError] = useState('');
   const [interns, setInterns] = useState([]);
   const [selectedIntern, setSelectedIntern] = useState('');
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState({
-    startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0],
+    startDate: toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
+    endDate: toLocalDateKey(),
   });
   const [activeTab, setActiveTab] = useState('logbook');
   const [logbookEntries, setLogbookEntries] = useState([]);
@@ -22,14 +25,15 @@ export default function InternProgress() {
   const [faceMsg, setFaceMsg] = useState('');
 
   useEffect(() => {
-    api.get('/users', { params: { role: 'INTERN' } }).then(res => setInterns(res.data.data));
+    api.get('/users', { params: { role: 'INTERN' } }).then(res => setInterns(res.data.data)).catch(() => setPageError('Unable to load interns. Please reload.'));
   }, []);
 
-  useEffect(() => {
-    if (selectedIntern) fetchAllData();
-  }, [selectedIntern, dateRange]);
 
-  const fetchAllData = async () => {
+
+  const latestRequest = useRef({ id: 0 });
+  const fetchAllData = useCallback(async () => {
+    const requestId = ++latestRequest.current.id;
+    setLogbookEntries([]); setPlannerEvents([]); setAttendances([]); setPageError('');
     setLoading(true);
     try {
       const params = { ...dateRange, targetUserId: selectedIntern };
@@ -38,15 +42,17 @@ export default function InternProgress() {
         api.get('/planner/events', { params }),
         api.get('/attendance', { params }),
       ]);
+      if (requestId !== latestRequest.current.id) return;
       setLogbookEntries(logRes.data.data);
       setPlannerEvents(planRes.data.data);
       setAttendances(attRes.data.data);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
-  };
+    } catch (err) { if (requestId === latestRequest.current.id) setPageError(err.response?.data?.error || 'Unable to load intern progress. Please try again.'); }
+    finally { if (requestId === latestRequest.current.id) setLoading(false); }
+  }, [selectedIntern, dateRange]);
+  useEffect(() => { if (selectedIntern) fetchAllData(); const counter = latestRequest.current; return () => { counter.id++; }; }, [fetchAllData, selectedIntern]);
 
-  const formatDate = (dateStr) => {
-    const d = new Date(dateStr);
+  const formatDate = (dateStr, dateOnly = false) => {
+    const d = dateOnly ? fromLocalDateKey(dateStr.split('T')[0]) : new Date(dateStr);
     return d.toLocaleDateString("en-GB", { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   };
 
@@ -102,7 +108,7 @@ export default function InternProgress() {
     // Logbook table
     const tableData = [];
     logbookEntries.forEach(entry => {
-      const dateStr = new Date(entry.date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short', year: 'numeric' });
+      const dateStr = fromLocalDateKey(entry.date.split('T')[0]).toLocaleDateString("en-GB", { day: 'numeric', month: 'short', year: 'numeric' });
       if (entry.tasks?.length > 0) {
         entry.tasks.forEach(task => {
           tableData.push([
@@ -132,6 +138,7 @@ export default function InternProgress() {
 
   return (
     <div className="animate-fade-in-up">
+      {pageError && <p role="alert" className="text-sm text-red-400">{pageError}</p>}
       <div className="page-header flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
         <div>
           <h1 className="page-title">Intern Progress</h1>
@@ -232,7 +239,7 @@ export default function InternProgress() {
                   ? { background: 'var(--color-surface)', color: 'var(--color-primary)', boxShadow: 'var(--shadow-panel-sm)' }
                   : { color: 'var(--color-text-muted)' }}
               >
-                <Icon size={14} />
+                {createElement(Icon, { size: 14 })}
                 <span className="hidden sm:inline">{label}</span>
                 <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: activeTab === key ? 'var(--color-primary-100)' : 'var(--color-border-light)', color: activeTab === key ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>{count}</span>
               </button>
@@ -255,7 +262,7 @@ export default function InternProgress() {
                   >
                     <div className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--color-primary)' }} />
-                      <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{formatDate(entry.date)}</span>
+                      <span className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>{formatDate(entry.date, true)}</span>
                       <span className="text-[11px] px-2 py-0.5 rounded-full" style={{ background: 'var(--color-primary-100)', color: 'var(--color-primary)' }}>
                         {entry.tasks?.length || 0} task
                       </span>

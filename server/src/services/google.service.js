@@ -1,3 +1,4 @@
+const { todayKey, nextDate } = require('../utils/operationalTime');
 const { google } = require('googleapis');
 const config = require('../config/env');
 const { prisma } = require('../middleware/auth');
@@ -12,13 +13,13 @@ function createOAuth2Client() {
   );
 }
 
-function getAuthUrl(userId) {
+function getAuthUrl(state) {
   const client = createOAuth2Client();
   return client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent',
-    state: userId,
+    state,
   });
 }
 
@@ -70,14 +71,15 @@ async function syncEventToCalendar(userId, event) {
       summary: event.title,
       description: event.description || '',
       start: event.allDay
-        ? { date: event.startDate.toISOString().split('T')[0], timeZone }
+        ? { date: todayKey(event.startDate), timeZone }
         : { dateTime: event.startDate.toISOString(), timeZone },
       end: event.allDay
-        ? { date: event.endDate.toISOString().split('T')[0], timeZone }
+        ? { date: nextDate(todayKey(event.endDate)), timeZone }
         : { dateTime: event.endDate.toISOString(), timeZone },
     };
 
-    const res = await calendar.events.insert({
+    const res = await calendar.events[event.gcalEventId ? 'update' : 'insert']({
+      ...(event.gcalEventId ? { eventId: event.gcalEventId } : {}),
       calendarId: 'primary',
       requestBody: eventBody,
     });

@@ -7,9 +7,10 @@ export const enrollFace = (photo, label) => {
   return api.post('/face/enroll', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 
-export const verifyFace = (photo) => {
+export const verifyFace = (photo, date) => {
   const formData = new FormData();
   formData.append('photo', photo);
+  formData.append('date', date);
   return api.post('/face/verify', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 

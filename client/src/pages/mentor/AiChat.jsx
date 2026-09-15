@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import api from '../../api/client';
-import { Send, Bot, Sparkles, Trash2, Plus, MessageSquare, Pencil, Check, X } from 'lucide-react';
+import { Send, Bot, Trash2, Plus, MessageSquare, Pencil, Check, X } from 'lucide-react';
 
 // ── Markdown Renderer ──
 
@@ -19,15 +19,15 @@ function renderMarkdown(text) {
       elements.push(<ol key={`ol-${i}`} className="list-decimal list-inside space-y-0.5 my-1 text-sm">{items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ol>);
       continue;
     }
-    if (/^[\-\*]\s/.test(line)) {
+    if (/^[-*]\s/.test(line)) {
       const items = [];
-      while (i < lines.length && /^[\-\*]\s/.test(lines[i])) { items.push(lines[i].replace(/^[\-\*]\s/, '')); i++; }
+      while (i < lines.length && /^[-*]\s/.test(lines[i])) { items.push(lines[i].replace(/^[-*]\s/, '')); i++; }
       elements.push(<ul key={`ul-${i}`} className="list-disc list-inside space-y-0.5 my-1 text-sm">{items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ul>);
       continue;
     }
-    if (/^\s+[\-\*]\s/.test(line)) {
+    if (/^\s+[-*]\s/.test(line)) {
       const items = [];
-      while (i < lines.length && /^\s+[\-\*]\s/.test(lines[i])) { items.push(lines[i].replace(/^\s+[\-\*]\s/, '')); i++; }
+      while (i < lines.length && /^\s+[-*]\s/.test(lines[i])) { items.push(lines[i].replace(/^\s+[-*]\s/, '')); i++; }
       elements.push(<ul key={`sul-${i}`} className="list-disc list-inside space-y-0.5 my-0.5 ml-4 text-sm">{items.map((item, j) => <li key={j}>{renderInline(item)}</li>)}</ul>);
       continue;
     }
@@ -99,29 +99,33 @@ function RoomSidebar({ rooms, activeRoom, onSelect, onCreate, onRename, onDelete
 
 // ── Main Component ──
 
+const greeting = { role: 'assistant', content: 'Hello! I am the **InTrack AI Assistant**.\n\nI can help you:\n- Monitor **intern progress**\n- Analyse **attendance data**\n- Get **insights and suggestions**\n\nAsk me anything!' };
+
 export default function AiChat() {
   const [rooms, setRooms] = useState([]);
   const [activeRoom, setActiveRoom] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [chatError, setChatError] = useState('');
   const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef(null);
 
-  const greeting = { role: 'assistant', content: 'Hello! I am the **InTrack AI Assistant**, powered by **Gemini Flash** ⚡\n\nI can help you:\n- Monitor **intern progress**\n- Analyse **attendance data**\n- Get **insights and suggestions**\n\nAsk me anything!' };
 
-  useEffect(() => { loadRooms(); }, []);
+
+
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  const loadRooms = async () => {
+  const loadRooms = useCallback(async () => {
     try {
       const res = await api.get('/admin/mentor/chat-rooms');
       const data = res.data.data;
       setRooms(data);
-      if (data.length > 0 && !activeRoom) setActiveRoom(data[0].id);
-    } catch {} finally { setRoomsLoaded(true); }
-  };
+      if (data.length > 0) setActiveRoom(current => current || data[0].id);
+    } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); } finally { setRoomsLoaded(true); }
+  }, []);
+  useEffect(() => { loadRooms(); }, [loadRooms]);
 
   const loadMessages = useCallback(async (roomId) => {
     if (!roomId) { setMessages([greeting]); return; }
@@ -137,6 +141,7 @@ export default function AiChat() {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
+    setChatError('');
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setLoading(true);
@@ -149,8 +154,9 @@ export default function AiChat() {
         loadRooms();
       }
     } catch (err) {
-      const errMsg = err.response?.status === 502 ? "Unable to reach the AI service. Please try again later." : "Something went wrong. Please try again.";
-      setMessages(prev => [...prev, { role: 'assistant', content: errMsg }]);
+      setChatError(err.response?.data?.error || 'Unable to send your message. Please try again.');
+      setMessages(prev => prev.slice(0, -1));
+      setInput(userMsg);
     } finally { setLoading(false); }
   };
 
@@ -161,14 +167,14 @@ export default function AiChat() {
       const res = await api.post('/admin/mentor/chat-rooms', { name: "New Chat" });
       await loadRooms();
       setActiveRoom(res.data.data.id);
-    } catch {}
+    } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); }
   };
 
   const renameRoom = async (id, name) => {
     try {
       await api.put(`/admin/mentor/chat-rooms/${id}`, { name });
       loadRooms();
-    } catch {}
+    } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); }
   };
 
   const deleteRoom = async (id) => {
@@ -177,7 +183,7 @@ export default function AiChat() {
       const updated = rooms.filter(r => r.id !== id);
       setRooms(updated);
       if (activeRoom === id) setActiveRoom(updated[0]?.id || null);
-    } catch {}
+    } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); }
   };
 
   if (!roomsLoaded) return <div className="flex items-center justify-center h-64"><div className="spinner" /></div>;
@@ -207,9 +213,6 @@ export default function AiChat() {
                 AI Assistant
               </h1>
               <p className="flex items-center gap-2 mt-0.5">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] rounded-md font-medium tracking-wide" style={{ background: 'var(--color-brand-surface)', color: 'var(--color-brand)' }}>
-                  <Sparkles size={10} /> GEMINI FLASH
-                </span>
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--color-text-muted)' }}>Powered by InTrack</span>
               </p>
             </div>
@@ -217,6 +220,7 @@ export default function AiChat() {
         </div>
 
         {/* Messages */}
+        {chatError && <p role="alert" className="px-4 py-2 text-sm text-red-400">{chatError}</p>}
         <div className="flex-1 overflow-y-auto space-y-3 p-4">
           {messages.map((msg, i) => (
             <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in-up`}>

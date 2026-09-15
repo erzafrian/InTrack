@@ -6,6 +6,9 @@ const router = Router();
 
 router.use(authenticate);
 
+// Read-only attendance configuration for the intern UI
+router.get('/attendance/config', adminController.getSettings);
+
 // Settings
 router.get('/settings', authorize('SUPERUSER'), adminController.getSettings);
 router.put('/settings', authorize('SUPERUSER'), adminController.updateSettings);
