@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(INTERN)
+  department          String?
+  avatarUrl           String?  @map("avatar_url")
+  googleRefreshToken  String?  @map("google_refresh_token")
+  notionAccessToken   String?  @map("notion_access_token")
+  notionDatabaseId    String?  @map("notion_database_id")
+  mentorId            String?  @map("mentor_id")
+  mentor       User?    @relation("MentorInterns", fields: [mentorId], references: [id])
+  interns      User[]   @relation("MentorInterns")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  faceEnrolled         Boolean  @default(false) @map("face_enrolled")
+
+  attendances      Attendance[]
+  logbookEntries   LogbookEntry[]
+  plannerEvents    PlannerEvent[]
+  chatRooms        ChatRoom[]
+  faceEmbeddings   FaceEmbedding[]
+
+  @@map("users")
+}
+
+enum Role {
+  INTERN
+  MENTOR
+  SUPERUSER
+}
+
+model Attendance {
+  id          String           @id @default(cuid())
+  userId      String           @map("user_id")
+  user        User             @relation(fields: [userId], references: [id])
+  date        DateTime         @db.Date
+  status      AttendanceStatus
+  checkInTime DateTime?        @map("check_in_time")
+  latitude    Float?
+  longitude   Float?
+  distanceKm  Float?           @map("distance_km")
+  reason      String?
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  evidences     AttendanceEvidence[]
+  externalSyncs ExternalSync[]
+
+  @@unique([userId, date])
+  @@map("attendances")
+}
+
+enum AttendanceStatus {
+  HADIR
+  IZIN
+  SAKIT
+}
+
+model AttendanceEvidence {
+  id           String     @id @default(cuid())
+  attendanceId String     @map("attendance_id")
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  fileUrl      String     @map("file_url")
+  fileType     String     @map("file_type")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  @@map("attendance_evidences")
+}
+
+model FaceEmbedding {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  embedding Float[]  // 512-dim vector from InsightFace
+  label     String?  // "front", "left", "right"
+  imageUrl  String?  @map("image_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("face_embeddings")
+}
+
+model LogbookEntry {
+  id        String        @id @default(cuid())
+  userId    String        @map("user_id")
+  user      User          @relation(fields: [userId], references: [id])
+  date      DateTime      @db.Date
+  tasks     LogbookTask[]
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  @@unique([userId, date])
+  @@map("logbook_entries")
+}
+
+model LogbookTask {
+  id                   String       @id @default(cuid())
+  entryId              String       @map("entry_id")
+  entry                LogbookEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  timeStart            String       @map("time_start")
+  timeEnd              String       @map("time_end")
+  activity             String       @default("")
+  quantitativeActivity String       @default("") @map("quantitative_activity")
+  qualitativeActivity  String       @default("") @map("qualitative_activity")
+  output               String       @default("")
+  evidenceUrl          String?      @map("evidence_url")
+  createdAt            DateTime     @default(now()) @map("created_at")
+
+  @@map("logbook_tasks")
+}
+
+model PlannerEvent {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id])
+  title       String
+  startDate   DateTime @map("start_date")
+  endDate     DateTime @map("end_date")
+  allDay      Boolean  @default(false) @map("all_day")
+  description String?
+  gcalEventId String?  @map("gcal_event_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("planner_events")
+}
+
+model ExternalSync {
+  id         String      @id @default(cuid())
+  entityType String      @map("entity_type")
+  entityId   String      @map("entity_id")
+  provider   String
+  externalId String      @map("external_id")
+  lastSynced DateTime    @map("last_synced")
+  status     String      @default("synced")
+  attendance Attendance? @relation(fields: [entityId], references: [id])
+
+  @@map("external_syncs")
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
+model ChatRoom {
+  id        String        @id @default(cuid())
+  userId    String        @map("user_id")
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String        @default("Chat Baru")
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  messages  ChatMessage[]
+
+  @@map("chat_rooms")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  roomId    String   @map("room_id")
+  room      ChatRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  role      String
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}
+

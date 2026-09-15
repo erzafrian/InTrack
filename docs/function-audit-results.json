@@ -1,0 +1,114 @@
+{
+  "date": "2026-09-15",
+  "mode": "isolated synthetic HTTP audit; no live DB/provider calls",
+  "results": [
+    {
+      "check": "Unauthenticated /api/auth/me",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/attendance",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/logbook",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/planner/events",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/users",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/admin/settings",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/face/status",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Unauthenticated /api/google/status",
+      "expected": 401,
+      "actual": 401,
+      "passed": true
+    },
+    {
+      "check": "Intern role denied /api/admin/settings",
+      "expected": 403,
+      "actual": 403,
+      "passed": true
+    },
+    {
+      "check": "Intern role denied /api/users",
+      "expected": 403,
+      "actual": 403,
+      "passed": true
+    },
+    {
+      "check": "Intern role denied /api/admin/mentor/chat-rooms",
+      "expected": 403,
+      "actual": 403,
+      "passed": true
+    },
+    {
+      "check": "Foreign attendance must be denied",
+      "expected": "403 or 404",
+      "actual": 200,
+      "passed": false
+    },
+    {
+      "check": "Foreign logbook task deletion must be denied",
+      "expected": "403 or 404",
+      "actual": 200,
+      "passed": false
+    },
+    {
+      "check": "Foreign planner deletion denied",
+      "expected": 404,
+      "actual": 404,
+      "passed": true
+    },
+    {
+      "check": "Attendance without face verification must be denied (reopened synthetic date)",
+      "expected": "4xx",
+      "actual": 201,
+      "passed": false
+    },
+    {
+      "check": "Face photo requirement matches enrollment threshold",
+      "expected": 15,
+      "actual": 3,
+      "passed": false
+    },
+    {
+      "check": "Notion receives user name on first-login access token",
+      "expected": "user name",
+      "actual": null,
+      "passed": false
+    },
+    {
+      "check": "API health",
+      "expected": 200,
+      "actual": 200,
+      "passed": true
+    }
+  ]
+}

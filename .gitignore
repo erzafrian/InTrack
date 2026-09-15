@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+venv/
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
