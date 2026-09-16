@@ -1,102 +1,100 @@
-const { todayKey } = require('../utils/operationalTime');
+﻿const { todayKey, TIME_ZONE, dayStart } = require('../utils/operationalTime');
 const { prisma } = require('../middleware/auth');
-const statusLabels = { HADIR: 'Present', IZIN: 'On Leave', SAKIT: 'Sick' };
 
-async function buildContext(userId) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, name: true } });
+const LIMIT = 100;
+function shiftDate(key, days) {
+  const date = new Date(key);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function buildContext(userId, now = new Date()) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
   if (!user) return '';
 
-  const lines = ['--- REAL-TIME INTRACK DATABASE CONTEXT ---'];
-  const today = new Date();
-  const todayStr = todayKey(today);
-  const monthAgo = new Date(today);
-  monthAgo.setDate(monthAgo.getDate() - 30);
-
-  // Get interns (Dashboard currently shows all interns to Mentors, so AI should too)
-  const internWhere = { role: 'INTERN' };
+  const today = todayKey(now);
+  const periodStart = shiftDate(today, -29); // 30 calendar dates including today.
+  const tomorrow = shiftDate(today, 1);
+  const plannerEnd = shiftDate(today, 31);
+  // Matches the current mentor dashboard's directory access.
   const interns = await prisma.user.findMany({
-    where: internWhere,
+    where: { role: 'INTERN' },
     select: { id: true, name: true, email: true, department: true },
   });
-
-  lines.push(`\n### Intern Directory (${interns.length} people)`);
-  if (interns.length === 0) {
-    lines.push('- No registered interns');
-  } else {
-    interns.forEach(i => lines.push(`- ${i.name} (${i.email})${i.department ? ` — ${i.department}` : ''}`));
-  }
-
-  if (interns.length > 0) {
-    const internIds = interns.map(i => i.id);
-
-    // Today's attendance
-    const todayStart = new Date(todayStr);
-    const todayEnd = new Date(todayStr);
-    todayEnd.setDate(todayEnd.getDate() + 1);
-
-    const todayAttendance = await prisma.attendance.findMany({
-      where: { userId: { in: internIds }, date: { gte: todayStart, lt: todayEnd } },
-      include: { user: { select: { name: true } } },
-    });
-
-    lines.push(`\n### Today’s Attendance (${todayStr})`);
-    const checkedIn = todayAttendance.map(a => `- ${a.user.name}: **${statusLabels[a.status] || 'Not Checked In'}** (${a.checkInTime ? new Date(a.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' }) : '-'})`);
-    const notCheckedIn = interns.filter(i => !todayAttendance.find(a => a.userId === i.id)).map(i => `- ${i.name}: **NOT CHECKED IN**`);
-    lines.push(`Checked in: ${todayAttendance.length}/${interns.length}`);
-    checkedIn.forEach(l => lines.push(l));
-    notCheckedIn.forEach(l => lines.push(l));
-
-    // This month's summary
-    const monthAttendance = await prisma.attendance.findMany({
-      where: { userId: { in: internIds }, date: { gte: monthAgo } },
-      include: { user: { select: { name: true } } },
-    });
-
-    lines.push(`\n### Attendance Summary for the Last 30 Days`);
-    interns.forEach(intern => {
-      const records = monthAttendance.filter(a => a.userId === intern.id);
-      const hadir = records.filter(a => a.status === 'HADIR').length;
-      const izin = records.filter(a => a.status === 'IZIN').length;
-      const sakit = records.filter(a => a.status === 'SAKIT').length;
-      lines.push(`- ${intern.name}: Present ${hadir} days, On Leave ${izin} days, Sick ${sakit} days (total ${records.length} days)`);
-    });
-
-    // Recent logbook
-    const recentLogbooks = await prisma.logbookEntry.findMany({
-      where: { userId: { in: internIds }, date: { gte: monthAgo } },
+  const context = {
+    today, timeZone: TIME_ZONE,
+    directory: { total: interns.length, interns },
+    coverage: {
+      attendanceAndLogbook: { start: periodStart, endInclusive: today },
+      planner: { start: periodStart, endExclusive: plannerEnd },
+      workdayScheduleAvailable: false,
+      completionTargetsAvailable: false,
+      note: 'Recorded activities, output and plans do not establish completion percentage or overall performance. A plan is not evidence of completion.',
+    },
+    attendanceToday: { recorded: 0, present: 0, onLeave: 0, sick: 0, notRecorded: interns.length, interns: [] },
+    attendanceSummary: [],
+    logbooks: { entries: [], hasMore: false, limit: LIMIT },
+    planner: { entries: [], hasMore: false, limit: LIMIT },
+  };
+  if (!interns.length) return JSON.stringify(context);
+  const internIds = interns.map(i => i.id);
+  const [attendance, logbooks, planner] = await Promise.all([
+    prisma.attendance.findMany({
+      where: { userId: { in: internIds }, date: { gte: new Date(periodStart), lt: new Date(tomorrow) } },
+      select: { userId: true, date: true, status: true, checkInTime: true },
+    }),
+    prisma.logbookEntry.findMany({
+      where: { userId: { in: internIds }, date: { gte: new Date(periodStart), lt: new Date(tomorrow) } },
       include: { user: { select: { name: true } }, tasks: true },
-      orderBy: { date: 'desc' },
-      take: 100,
-    });
-
-    if (recentLogbooks.length > 0) {
-      lines.push(`\n### Logbook Terbaru (30 days)`);
-      recentLogbooks.forEach(entry => {
-        const d = entry.date.toISOString().split('T')[0];
-        const taskSummary = entry.tasks.map(t => t.activity || t.output).filter(Boolean).join(', ');
-        lines.push(`- ${entry.user.name} (${d}): ${taskSummary || 'No details'}`);
-      });
-    }
-
-    // Recent Planners (Added so AI knows the plans)
-    const recentPlanners = await prisma.plannerEvent.findMany({
-      where: { userId: { in: internIds }, startDate: { gte: monthAgo } },
+      orderBy: [{ date: 'desc' }, { id: 'asc' }], take: LIMIT + 1,
+    }),
+    prisma.plannerEvent.findMany({
+      // Include ongoing events that started before the visible period.
+      where: { userId: { in: internIds }, startDate: { lt: dayStart(plannerEnd) }, endDate: { gte: dayStart(periodStart) } },
       include: { user: { select: { name: true } } },
-      orderBy: { startDate: 'desc' },
-      take: 100,
+      orderBy: [{ startDate: 'asc' }, { id: 'asc' }], take: LIMIT + 1,
+    }),
+  ]);
+  for (const intern of interns) {
+    const records = attendance.filter(a => a.userId === intern.id);
+    const current = records.find(a => a.date.toISOString().slice(0, 10) === today);
+    const count = status => records.filter(a => a.status === status).length;
+    const presentDays = count('HADIR');
+    context.attendanceSummary.push({
+      internId: intern.id, name: intern.name, recordedDays: records.length,
+      presentDays, onLeaveDays: count('IZIN'), sickDays: count('SAKIT'),
+      presencePercentOfRecordedDays: records.length ? Math.round(presentDays / records.length * 10000) / 100 : null,
+      denominator: 'recordedDays; not scheduled workdays or calendar days',
     });
-
-    if (recentPlanners.length > 0) {
-      lines.push(`\n### Planner / Rencana Tugas (30 days)`);
-      recentPlanners.forEach(plan => {
-        const d = plan.startDate.toISOString().split('T')[0];
-        lines.push(`- ${plan.user.name} (${d}): ${plan.title}`);
-      });
+    context.attendanceToday.interns.push({
+      internId: intern.id, name: intern.name, status: current?.status || 'NOT_RECORDED',
+      recordedTimeWib: current?.checkInTime ? new Intl.DateTimeFormat('en-GB', {
+        timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).format(current.checkInTime) : null,
+    });
+    if (current) {
+      context.attendanceToday.recorded++;
+      context.attendanceToday.notRecorded--;
+      const key = { HADIR: 'present', IZIN: 'onLeave', SAKIT: 'sick' }[current.status];
+      if (key) context.attendanceToday[key]++;
     }
   }
-
-  lines.push('\n--- END DATABASE CONTEXT ---');
-  return lines.join('\n');
+  context.logbooks.hasMore = logbooks.length > LIMIT;
+  context.logbooks.entries = logbooks.slice(0, LIMIT).map(entry => ({
+    internId: entry.userId, name: entry.user.name, date: entry.date.toISOString().slice(0, 10),
+    tasks: entry.tasks.map(task => ({
+      timeStart: task.timeStart, timeEnd: task.timeEnd, activity: task.activity,
+      output: task.output, quantitativeActivity: task.quantitativeActivity,
+      qualitativeActivity: task.qualitativeActivity,
+    })),
+  }));
+  context.planner.hasMore = planner.length > LIMIT;
+  context.planner.entries = planner.slice(0, LIMIT).map(plan => ({
+    internId: plan.userId, name: plan.user.name, title: plan.title,
+    startDate: plan.startDate.toISOString(), endDate: plan.endDate.toISOString(),
+    allDay: plan.allDay, description: plan.description,
+  }));
+  return JSON.stringify(context);
 }
 
 module.exports = { buildContext };

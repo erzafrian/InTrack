@@ -44,14 +44,15 @@ test('Notion failures are retained as failed syncs for admin retry',async t=>{
 test('AI rejects provider credentials, quota, empty responses and timeout with useful errors',async t=>{
   require('../src/config/env').ai.apiKey='fixture-key';
   const ai = require('../src/services/ai.service');
+  const messages = [{ role: 'user', content: 'How many interns are registered?' }];
   const fetchMock=t.mock.method(global,'fetch',async()=>({ok:false,status:401}));
-  await assert.rejects(ai.chat([]),{statusCode:503,message:/credentials/});
+  await assert.rejects(ai.chat(messages),{statusCode:503,message:/credentials/});
   fetchMock.mock.mockImplementation(async()=>({ok:false,status:429}));
-  await assert.rejects(ai.chat([]),{statusCode:429});
+  await assert.rejects(ai.chat(messages),{statusCode:429});
   fetchMock.mock.mockImplementation(async()=>({ok:true,json:async()=>({choices:[]})}));
-  await assert.rejects(ai.chat([]),{statusCode:502});
+  await assert.rejects(ai.chat(messages),{statusCode:502});
   fetchMock.mock.mockImplementation(async()=>{throw Object.assign(new Error('timeout'),{name:'TimeoutError'});});
-  await assert.rejects(ai.chat([]),{statusCode:504});
+  await assert.rejects(ai.chat(messages),{statusCode:504});
 });
 
 test('logbook validates before upload and removes uploaded file if database save fails',async t=>{
