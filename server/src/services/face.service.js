@@ -16,66 +16,75 @@ async function callAIService(endpoint, file, extraFields = {}) {
     formData.append(key, value);
   }
 
-  const response = await fetch(`${AI_BASE}${endpoint}`, {
-    method: 'POST',
-    body: formData,
-    signal: AbortSignal.timeout(30000),
-  });
-
-  const result = await response.json();
-  if (!response.ok || !result.success) throw Object.assign(new Error(result.message || 'Face service unavailable'), { statusCode: response.status >= 500 ? 503 : 400 });
+  let response, result;
+  try {
+    response = await fetch(`${AI_BASE}${endpoint}`, { method: 'POST', body: formData, signal: AbortSignal.timeout(30000) });
+    result = await response.json();
+  } catch {
+    throw Object.assign(new Error('Face service is unavailable. Please try again.'), { statusCode: 503 });
+  }
+  if (!response.ok || !result.success) throw Object.assign(new Error(result.message || 'Face service unavailable'), { statusCode: response.status >= 500 ? 503 : response.status === 429 ? 429 : 400 });
   return result;
 }
 
 async function enrollFace(userId, file, label) {
+  const ensureOpen = async tx => {
+    const user = await tx.user.findUnique({ where: { id: userId }, select: { faceEnrolled: true } });
+    if (!user) throw Object.assign(new Error('User not found'), { statusCode: 404 });
+    const count = await tx.faceEmbedding.count({ where: { userId } });
+    if (user.faceEnrolled || count >= REQUIRED_PHOTOS) throw Object.assign(new Error('Face is already registered. Ask your mentor or administrator to reset it.'), { statusCode: 409 });
+    return count;
+  };
+  await ensureOpen(prisma);
   const result = await callAIService('/enroll', file);
-
-  await prisma.faceEmbedding.create({
-    data: {
-      userId,
-      embedding: result.embedding,
-      label: label || 'front',
-    },
-  });
-
-  const count = await prisma.faceEmbedding.count({ where: { userId } });
-  if (count >= REQUIRED_PHOTOS) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { faceEnrolled: true },
+  return prisma.$transaction(async tx => {
+    // Serializable isolation prevents concurrent requests from exceeding the cap.
+    const count = (await ensureOpen(tx)) + 1;
+    await tx.faceEmbedding.create({
+      data: { userId, embedding: result.embedding, label: label || 'front' },
     });
-  }
-
-  return { enrolled: count, remaining: Math.max(0, REQUIRED_PHOTOS - count) };
+    if (count >= REQUIRED_PHOTOS) {
+      await tx.user.update({ where: { id: userId }, data: { faceEnrolled: true } });
+    }
+    return { enrolled: count, remaining: Math.max(0, REQUIRED_PHOTOS - count) };
+  }, { isolationLevel: 'Serializable', timeout: 15000 });
 }
 
 async function verifyFace(userId, file, date) {
   parseDateOnly(date);
+  const embeddings = await prisma.faceEmbedding.findMany({
+    where: { userId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: REQUIRED_PHOTOS, select: { id: true, embedding: true },
+  });
+  if (embeddings.length < REQUIRED_PHOTOS) throw Object.assign(new Error('Complete all 15 enrollment photos first.'), { statusCode: 400 });
   const attempt = await prisma.faceAttempt.upsert({ where: { userId }, create: { userId }, update: {} });
   if (attempt.blockedUntil && attempt.blockedUntil <= new Date()) await prisma.faceAttempt.updateMany({ where: { userId, blockedUntil: { lte: new Date() } }, data: { failures: 0, blockedUntil: null } });
   const reservation = await prisma.faceAttempt.updateMany({ where: { userId, failures: { lt: 5 }, OR: [{ blockedUntil: null }, { blockedUntil: { lte: new Date() } }] }, data: { failures: { increment: 1 } } });
   if (!reservation.count) throw blocked();
   await prisma.faceAttempt.updateMany({ where: { userId, failures: { gte: 5 } }, data: { blockedUntil: new Date(Date.now() + 15 * 60000) } });
 
-  const embeddings = await prisma.faceEmbedding.findMany({
-    where: { userId },
-    select: { embedding: true },
-  });
-
-  if (embeddings.length < REQUIRED_PHOTOS) {
-    throw Object.assign(new Error('Complete all 15 enrollment photos first.'), { statusCode: 400 });
-  }
-
   const storedEmbeddings = embeddings.map((e) => e.embedding);
-
-  const result = await callAIService('/verify', file, {
-    stored_embeddings: JSON.stringify(storedEmbeddings),
-  });
+  let result;
+  try {
+    result = await callAIService('/verify', file, { stored_embeddings: JSON.stringify(storedEmbeddings) });
+  } catch (err) {
+    if (err.statusCode === 429 || err.statusCode >= 500) {
+      // Busy/offline providers are not failed identity checks.
+      await prisma.faceAttempt.updateMany({ where: { userId, failures: { gt: 0 } }, data: { failures: { decrement: 1 } } });
+      await prisma.faceAttempt.updateMany({ where: { userId, failures: { lt: 5 } }, data: { blockedUntil: null } });
+    }
+    throw err;
+  }
 
   let faceProof = null;
   if (result.match) {
-    await prisma.faceAttempt.update({ where: { userId }, data: { failures: 0, blockedUntil: null } });
-    faceProof = await tokenService.issue(userId, 'face', date, 2 * 60000);
+    faceProof = await prisma.$transaction(async tx => {
+      const count = await tx.faceEmbedding.count({ where: { userId, id: { in: embeddings.map(e => e.id) } } });
+      const user = await tx.user.findUnique({ where: { id: userId }, select: { faceEnrolled: true } });
+      if (count !== REQUIRED_PHOTOS || !user?.faceEnrolled) throw Object.assign(new Error('Face enrollment changed. Please verify again.'), { statusCode: 409 });
+      await tx.faceAttempt.updateMany({ where: { userId }, data: { failures: 0, blockedUntil: null } });
+      return tokenService.issue(userId, 'face', date, 2 * 60000, tx);
+    }, { isolationLevel: 'Serializable', timeout: 15000 });
   }
   return {
     faceProof,
@@ -101,14 +110,13 @@ async function getEnrollmentStatus(userId) {
 }
 
 async function resetEnrollment(userId) {
-  await prisma.oneTimeToken.deleteMany({ where: { userId, purpose: 'face' } });
-  await prisma.faceAttempt.deleteMany({ where: { userId } });
-  await prisma.faceEmbedding.deleteMany({ where: { userId } });
-  await prisma.user.update({
-    where: { id: userId },
-    data: { faceEnrolled: false },
-  });
-  return { reset: true };
+  return prisma.$transaction(async tx => {
+    await tx.oneTimeToken.deleteMany({ where: { userId, purpose: 'face' } });
+    await tx.faceAttempt.deleteMany({ where: { userId } });
+    await tx.faceEmbedding.deleteMany({ where: { userId } });
+    await tx.user.update({ where: { id: userId }, data: { faceEnrolled: false } });
+    return { reset: true };
+  }, { isolationLevel: 'Serializable', timeout: 15000 });
 }
 
 module.exports = { enrollFace, verifyFace, getEnrollmentStatus, resetEnrollment };

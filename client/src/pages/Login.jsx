@@ -55,7 +55,7 @@ export default function Login() {
               <label htmlFor="email" className="label">Email</label>
               <div className="relative">
                 <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-muted)' }} />
-                <input id="email" type="email" autoComplete="username" aria-invalid={!!error} aria-describedby={error ? 'login-error' : undefined} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className="input pl-10" required autoFocus />
+                <input id="email" type="email" autoComplete="username" aria-invalid={!!error} aria-describedby={error ? 'login-error' : undefined} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@intrack.com" className="input pl-10" required autoFocus />
               </div>
             </div>
             <div>

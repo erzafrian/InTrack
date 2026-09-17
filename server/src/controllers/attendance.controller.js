@@ -1,5 +1,5 @@
 const attendanceService = require('../services/attendance.service');
-const r2Service = require('../services/r2.service');
+const storageService = require('../services/storage.service');
 const { success, error } = require('../utils/response');
 const { prisma } = require('../middleware/auth');
 
@@ -27,7 +27,7 @@ async function submit(req, res, next) {
       const toMinutes = time => { const [h,m] = time.split(':').map(Number); return h*60+m; };
       if (minutesNow() < toMinutes(settings.absen_start_time) || minutesNow() > toMinutes(settings.absen_end_time)) return error(res, 'Attendance is available from ' + settings.absen_start_time + ' to ' + settings.absen_end_time + ' WIB', 400);
     }
-    fileUrl = await r2Service.uploadFile(req.file, 'attendance');
+    fileUrl = await storageService.uploadFile(req.file, 'attendance');
     const updated = await prisma.$transaction(async tx => {
       await tokenService.consume(faceProof, 'face', date, req.user.id, tx);
       const attendance = await attendanceService.submitAttendance(req.user.id, { date, status, latitude, longitude, reason }, tx);
@@ -35,10 +35,9 @@ async function submit(req, res, next) {
       return tx.attendance.findUnique({ where: { id: attendance.id }, include: { evidences: true, user: { select: { id: true, name: true, email: true } } } });
     }, { timeout: 15000 });
     fileUrl = null;
-    await require('../services/notion.service').syncAttendanceToNotion(req.user.id, updated, req.user.name).catch(() => {});
     return success(res, updated, 201);
   } catch (err) {
-    if (fileUrl) await r2Service.deleteFile(fileUrl).catch(() => {});
+    if (fileUrl) await storageService.deleteFile(fileUrl).catch(() => {});
     next(err);
   }
 }
@@ -66,12 +65,12 @@ async function uploadEvidence(req, res, next) {
   let fileUrl;
   try {
     if (!req.file) return error(res, 'File required', 400);
-    fileUrl = await r2Service.uploadFile(req.file, 'attendance');
+    fileUrl = await storageService.uploadFile(req.file, 'attendance');
     const evidence = await attendanceService.addEvidence(req.params.id, fileUrl, req.file.mimetype);
     fileUrl = null;
     return success(res, evidence, 201);
   } catch (err) {
-    if (fileUrl) await r2Service.deleteFile(fileUrl).catch(() => {});
+    if (fileUrl) await storageService.deleteFile(fileUrl).catch(() => {});
     next(err);
   }
 }

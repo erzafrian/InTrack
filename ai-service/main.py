@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from starlette.concurrency import run_in_threadpool
+import asyncio
 from fastapi.responses import JSONResponse
 import numpy as np
 import cv2
@@ -41,139 +43,63 @@ def cosine_similarity(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
+# One inference at a time per worker; excess requests fail fast instead of
+# retaining an unbounded queue of images on a small VPS.
+inference_lock = asyncio.Lock()
+MAX_FILE_BYTES = 10 * 1024 * 1024
+cv2.setNumThreads(1)
+
+
+def extract_embedding(contents):
+    img = decode_image(contents)
+    if img is None:
+        raise HTTPException(400, "Invalid image file")
+    faces = face_app.get(img)
+    if len(faces) != 1:
+        raise HTTPException(400, "Use a photo with exactly one face")
+    return faces[0].embedding.tolist()
+
+
+async def read_embedding(file):
+    if inference_lock.locked():
+        raise HTTPException(429, "Face service is busy. Please try again.", headers={"Retry-After": "2"})
+    async with inference_lock:
+        contents = await file.read(MAX_FILE_BYTES + 1)
+        if len(contents) > MAX_FILE_BYTES:
+            raise HTTPException(413, "Photo exceeds the 10 MiB limit")
+        # CPU work runs outside the event loop, keeping /health responsive.
+        return await run_in_threadpool(extract_embedding, contents)
+
+
+@app.exception_handler(HTTPException)
+async def http_error_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code,
+                        content={"success": False, "message": exc.detail},
+                        headers=exc.headers)
+
+
 @app.get("/health")
-def health():
+async def health():
     return {"status": "AI Service Running"}
 
 
 @app.post("/embedding")
-async def generate_embedding(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        img = decode_image(contents)
-
-        if img is None:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Invalid image file"}
-            )
-
-        faces = face_app.get(img)
-
-        if len(faces) == 0:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "No face detected"}
-            )
-
-        if len(faces) > 1:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Multiple faces detected"}
-            )
-
-        embedding = faces[0].embedding.tolist()
-
-        return {
-            "success": True,
-            "embedding": embedding
-        }
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "message": str(e)}
-        )
-
-
 @app.post("/enroll")
 async def enroll_face(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        img = decode_image(contents)
-
-        if img is None:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Invalid image file"}
-            )
-
-        faces = face_app.get(img)
-
-        if len(faces) == 0:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "No face detected in photo"}
-            )
-
-        if len(faces) > 1:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Multiple faces detected. Please use a photo with only one face."}
-            )
-
-        embedding = faces[0].embedding.tolist()
-
-        return {
-            "success": True,
-            "embedding": embedding
-        }
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "message": str(e)}
-        )
+    return {"success": True, "embedding": await read_embedding(file)}
 
 
 @app.post("/verify")
-async def verify_face(
-    file: UploadFile = File(...),
-    stored_embeddings: str = Form(...)
-):
+async def verify_face(file: UploadFile = File(...), stored_embeddings: str = Form(...)):
     try:
-        contents = await file.read()
-        img = decode_image(contents)
-
-        if img is None:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Invalid image file"}
-            )
-
-        faces = face_app.get(img)
-
-        if len(faces) == 0:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "No face detected"}
-            )
-
-        if len(faces) > 1:
-            return JSONResponse(
-                status_code=400,
-                content={"success": False, "message": "Multiple faces detected"}
-            )
-
-        current_embedding = faces[0].embedding.tolist()
-        embeddings_list = json.loads(stored_embeddings)
-
-        best_similarity = 0.0
-        for stored in embeddings_list:
-            sim = cosine_similarity(current_embedding, stored)
-            best_similarity = max(best_similarity, sim)
-
-        match = best_similarity >= SIMILARITY_THRESHOLD
-
-        return {
-            "success": True,
-            "match": match,
-            "similarity": round(best_similarity, 4),
-            "threshold": SIMILARITY_THRESHOLD
-        }
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "message": str(e)}
-        )
+        embeddings = np.asarray(json.loads(stored_embeddings), dtype=np.float32)
+        if (embeddings.ndim != 2 or embeddings.shape[1] != 512
+                or not 1 <= len(embeddings) <= 15 or not np.isfinite(embeddings).all()
+                or np.any(np.linalg.norm(embeddings, axis=1) == 0)):
+            raise ValueError("Invalid embeddings")
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid stored embeddings")
+    current = await read_embedding(file)
+    best_similarity = max(0.0, max(cosine_similarity(current, stored) for stored in embeddings))
+    return {"success": True, "match": best_similarity >= SIMILARITY_THRESHOLD,
+            "similarity": round(best_similarity, 4), "threshold": SIMILARITY_THRESHOLD}

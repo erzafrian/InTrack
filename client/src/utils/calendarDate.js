@@ -1,5 +1,12 @@
-// Calendar days are local dates, not UTC timestamps.
-export function toLocalDateKey(date = new Date()) {
+// Date-only calendar cells retain their labels; the default "today" is WIB.
+export function todayWib(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const part = type => parts.find(p => p.type === type).value;
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+export function toLocalDateKey(date) {
+  if (date === undefined) return todayWib();
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');

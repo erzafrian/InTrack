@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { Upload } from 'lucide-react';
 
-export default function FileUpload({ onFileSelect, accept = 'image/*,.pdf,.doc,.docx' }) {
+export default function FileUpload({ onFileSelect, accept = 'image/jpeg,image/png,image/webp,application/pdf' }) {
   const inputRef = useRef(null);
 
   const handleChange = (e) => {

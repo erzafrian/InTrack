@@ -16,6 +16,7 @@ model User {
   department          String?
   avatarUrl           String?  @map("avatar_url")
   googleRefreshToken  String?  @map("google_refresh_token")
+  // Legacy integration fields retained for database compatibility; no active reader/writer.
   notionAccessToken   String?  @map("notion_access_token")
   notionDatabaseId    String?  @map("notion_database_id")
   mentorId            String?  @map("mentor_id")
@@ -135,6 +136,7 @@ model PlannerEvent {
   @@map("planner_events")
 }
 
+// Legacy integration history. No new syncs are created; retained for existing databases.
 model ExternalSync {
   id         String      @id @default(cuid())
   entityType String      @map("entity_type")

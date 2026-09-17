@@ -13,7 +13,7 @@ export default function InternProgress() {
   const [selectedIntern, setSelectedIntern] = useState('');
   const [loading, setLoading] = useState(false);
   const [dateRange, setDateRange] = useState({
-    startDate: toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
+    startDate: toLocalDateKey().slice(0, 7) + '-01',
     endDate: toLocalDateKey(),
   });
   const [activeTab, setActiveTab] = useState('logbook');
@@ -53,7 +53,7 @@ export default function InternProgress() {
 
   const formatDate = (dateStr, dateOnly = false) => {
     const d = dateOnly ? fromLocalDateKey(dateStr.split('T')[0]) : new Date(dateStr);
-    return d.toLocaleDateString("en-GB", { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    return d.toLocaleDateString("en-GB", { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', ...(dateOnly ? {} : { timeZone: 'Asia/Jakarta' }) });
   };
 
   const selectedInternName = interns.find(i => i.id === selectedIntern)?.name || '';
@@ -95,7 +95,7 @@ export default function InternProgress() {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.text(`Period: ${dateRange.startDate} to ${dateRange.endDate}`, 14, 28);
-    doc.text(`Printed: ${new Date().toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 14, 34);
+    doc.text(`Printed: ${new Date().toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}`, 14, 34);
 
     // Attendance summary
     doc.setFont('helvetica', 'bold');
@@ -341,7 +341,7 @@ export default function InternProgress() {
                       <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
                         <Clock size={11} />
                         {event.allDay ? `${formatDate(event.startDate)} (All Day)` :
-                          `${formatDate(event.startDate)} ${new Date(event.startDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })} - ${new Date(event.endDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}`}
+                          `${formatDate(event.startDate)} ${new Date(event.startDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })} - ${new Date(event.endDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}`}
                       </p>
                       {event.description && <p className="text-xs mt-1.5 line-clamp-3" style={{ color: 'var(--color-text-secondary)' }}>{event.description}</p>}
                     </div>
@@ -378,7 +378,7 @@ export default function InternProgress() {
                           </span>
                         </td>
                         <td>
-                          {a.checkInTime ? <span className="flex items-center gap-1"><Clock size={12} />{new Date(a.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}</span> : '-'}
+                          {a.checkInTime ? <span className="flex items-center gap-1"><Clock size={12} />{new Date(a.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}</span> : '-'}
                         </td>
                         <td>{a.distanceKm != null ? <span className="flex items-center gap-1"><MapPin size={12} />{a.distanceKm} km</span> : '-'}</td>
                         <td>{a.reason || '-'}</td>

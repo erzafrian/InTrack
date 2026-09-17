@@ -3,10 +3,10 @@ const { prisma } = require('../config/database');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const denied = () => Object.assign(new Error('Verification is invalid or expired. Please try again.'), { statusCode: 401 });
 
-async function issue(userId, purpose, context, lifetimeMs) {
+async function issue(userId, purpose, context, lifetimeMs, tx = prisma) {
   const token = crypto.randomBytes(32).toString('hex');
-  await prisma.oneTimeToken.deleteMany({ where: { expiresAt: { lte: new Date() } } });
-  await prisma.oneTimeToken.create({ data: { id: hash(token), userId, purpose, context, expiresAt: new Date(Date.now() + lifetimeMs) } });
+  await tx.oneTimeToken.deleteMany({ where: { expiresAt: { lte: new Date() } } });
+  await tx.oneTimeToken.create({ data: { id: hash(token), userId, purpose, context, expiresAt: new Date(Date.now() + lifetimeMs) } });
   return token;
 }
 

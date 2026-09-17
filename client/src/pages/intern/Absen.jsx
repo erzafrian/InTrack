@@ -1,4 +1,5 @@
 import { attendanceLabel } from '../../utils/presentation';
+import { toLocalDateKey, fromLocalDateKey } from '../../utils/calendarDate';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { getAttendances, submitAttendance } from '../../api/attendance';
 import { verifyFace, getFaceStatus } from '../../api/face';
@@ -45,7 +46,7 @@ export default function Absen() {
 
   const getWorkingDays = useCallback((offset = 0) => {
     const days = [];
-    const today = new Date();
+    const today = fromLocalDateKey(toLocalDateKey());
     const start = new Date(today);
     // Move back by (offset * 12) working days from the base start
     start.setDate(today.getDate() - today.getDay() + 1 - 7);
@@ -74,13 +75,10 @@ export default function Absen() {
 
   const workingDays = useMemo(() => getWorkingDays(pageOffset), [getWorkingDays, pageOffset]);
 
-  // Local timezone date formatter (avoids UTC shift from toISOString)
-  const toLocalDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
   const fetchAttendances = useCallback(async () => {
     try {
-      const startDate = toLocalDateStr(workingDays[0]);
-      const endDate = toLocalDateStr(workingDays[workingDays.length - 1]);
+      const startDate = toLocalDateKey(workingDays[0]);
+      const endDate = toLocalDateKey(workingDays[workingDays.length - 1]);
       const res = await getAttendances({ startDate, endDate });
       setAttendances(res.data.data);
     } catch (err) { setError(err.response?.data?.error || 'Unable to load attendance. Please try again.'); } finally { setLoading(false); }
@@ -89,11 +87,11 @@ export default function Absen() {
   useEffect(() => { setLoading(true); fetchAttendances(); }, [fetchAttendances]);
 
   const getAttendanceForDate = (date) => {
-    const dateStr = toLocalDateStr(date);
+    const dateStr = toLocalDateKey(date);
     return attendances.find(a => a.date.slice(0, 10) === dateStr);
   };
 
-  const isReopened = (date) => reopenedDates.includes(toLocalDateStr(date));
+  const isReopened = (date) => reopenedDates.includes(toLocalDateKey(date));
 
   const openModal = (date) => {
     const att = getAttendanceForDate(date);
@@ -158,7 +156,7 @@ export default function Absen() {
   const doSubmitAttendance = async (faceProof) => {
     setSubmitting(true);
     try {
-      await submitAttendance({ date: toLocalDateStr(selectedDate), status, latitude: location?.latitude, longitude: location?.longitude, reason, evidence, faceProof });
+      await submitAttendance({ date: toLocalDateKey(selectedDate), status, latitude: location?.latitude, longitude: location?.longitude, reason, evidence, faceProof });
       await fetchAttendances();
       setModalOpen(false); setFaceVerifyOpen(false);
       setFaceAttempts(0);
@@ -172,7 +170,7 @@ export default function Absen() {
     setFaceError('');
     setFaceResult(null);
     try {
-      const res = await verifyFace(file, toLocalDateStr(selectedDate));
+      const res = await verifyFace(file, toLocalDateKey(selectedDate));
       const data = res.data.data;
       if (data.match) {
         setFaceResult('success');
@@ -211,9 +209,9 @@ export default function Absen() {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', "May", 'Jun', 'Jul', "Aug", 'Sep', "Oct", 'Nov', "Dec"];
     return { day: days[date.getDay()], date: date.getDate(), month: months[date.getMonth()], year: date.getFullYear() };
   };
-  const isToday = (d) => d.toDateString() === new Date().toDateString();
-  const isPast = (d) => d < new Date(new Date().setHours(0, 0, 0, 0));
-  const isFuture = (d) => d > new Date(new Date().setHours(23, 59, 59, 999));
+  const isToday = (d) => toLocalDateKey(d) === toLocalDateKey();
+  const isPast = (d) => toLocalDateKey(d) < toLocalDateKey();
+  const isFuture = (d) => toLocalDateKey(d) > toLocalDateKey();
 
   // Period label
   const periodLabel = workingDays.length > 0
@@ -328,7 +326,7 @@ export default function Absen() {
                     </div>
                     {att.checkInTime && (
                       <div className="text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                        Check-in: {new Date(att.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}
+                        Check-in: {new Date(att.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}
                       </div>
                     )}
                     {att.distanceKm != null && (

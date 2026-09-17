@@ -8,13 +8,13 @@ test('HTTP local cookies use Lax and remain HttpOnly', () => {
   });
 });
 
-test('HTTPS cookies retain cross-site support with Secure', () => {
+test('HTTPS cookies remain Lax and Secure for same-site deployment', () => {
   for (const req of [
     { secure: true, headers: {} },
     { secure: false, headers: { 'x-forwarded-proto': 'https' } },
   ]) {
     assert.deepEqual(authCookieOptions(req), {
-      httpOnly: true, secure: true, sameSite: 'none', path: '/',
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/',
     });
   }
 });

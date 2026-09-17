@@ -4,11 +4,14 @@ import { spawnSync } from 'node:child_process';
 
 const moduleUrl = new URL('../src/utils/calendarDate.js', import.meta.url).href;
 
-for (const timezone of ['Asia/Jakarta', 'UTC', 'America/Los_Angeles']) {
+for (const timezone of ['Asia/Jakarta', 'Asia/Makassar', 'Asia/Jayapura', 'UTC', 'America/Los_Angeles']) {
   test(`calendar selection stays on the displayed day in ${timezone}`, () => {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import assert from 'node:assert/strict';
-      import { toLocalDateKey, fromLocalDateKey, shiftCalendarMonth } from ${JSON.stringify(moduleUrl)};
+      import { toLocalDateKey, fromLocalDateKey, shiftCalendarMonth, todayWib } from ${JSON.stringify(moduleUrl)};
+      assert.equal(todayWib(new Date('2026-09-17T16:30:00Z')), '2026-09-17');
+      assert.equal(todayWib(new Date('2026-09-17T17:00:00Z')), '2026-09-18');
+      assert.equal(toLocalDateKey(), todayWib());
       // Local midnight must not select the next/previous numbered cell.
       assert.equal(toLocalDateKey(new Date(2026, 8, 15, 0, 30)), '2026-09-15');
       const cells = Array.from({ length: 30 }, (_, i) => new Date(2026, 8, i + 1));

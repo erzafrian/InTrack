@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getPlannerEvents, createPlannerEvent, deletePlannerEvent, getGoogleStatus, getGoogleAuthUrl, disconnectGoogle } from '../../api/planner';
+import { getPlannerEvents, createPlannerEvent, deletePlannerEvent, syncPlannerEvent, getGoogleStatus, getGoogleAuthUrl, disconnectGoogle } from '../../api/planner';
 import Modal from '../../components/Modal';
 import { toLocalDateKey, fromLocalDateKey, shiftCalendarMonth } from '../../utils/calendarDate';
 import { Plus, Trash2, ChevronLeft, ChevronRight, CalendarDays, Clock, Link2, Unlink, CheckCircle2, ExternalLink } from 'lucide-react';
@@ -26,6 +26,7 @@ export default function Planner() {
   const [submitting, setSubmitting] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [syncingEvent, setSyncingEvent] = useState(null);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => { fetchEvents(); checkGoogleStatus(); }, []);
@@ -57,7 +58,7 @@ export default function Planner() {
     try {
       const res = await getGoogleAuthUrl();
       window.location.href = res.data.data.url;
-    } catch (err) { console.error(err); setGoogleLoading(false); }
+    } catch (err) { setPageError(err.response?.data?.error || 'Unable to connect Google Calendar.'); setGoogleLoading(false); }
   };
 
   const handleGoogleDisconnect = async () => {
@@ -76,8 +77,8 @@ export default function Planner() {
     try {
       const startDate = form.allDay ? `${form.startDate}T00:00:00+07:00` : `${form.startDate}T${form.startTime}:00+07:00`;
       const endDate = form.allDay ? `${form.endDate}T23:59:59+07:00` : `${form.endDate}T${form.endTime}:00+07:00`;
-      await createPlannerEvent({ title: form.title, startDate, endDate, allDay: form.allDay, description: form.description });
-      setPageError(''); setModalOpen(false); fetchEvents();
+      const res = await createPlannerEvent({ title: form.title, startDate, endDate, allDay: form.allDay, description: form.description });
+      setPageError(res.data.data.calendarWarning || ''); setModalOpen(false); fetchEvents();
     } catch (err) { setPageError(err.response?.data?.error || 'Unable to save changes. Please try again.'); }
     finally { setSubmitting(false); }
   };
@@ -85,6 +86,13 @@ export default function Planner() {
   const handleDelete = async (id) => {
     if (!confirm("Delete this event?")) return;
     try { await deletePlannerEvent(id); fetchEvents(); } catch (err) { setPageError(err.response?.data?.error || 'Unable to load or update planner. Please try again.'); }
+  };
+
+  const handleSync = async (id) => {
+    setSyncingEvent(id); setPageError('');
+    try { await syncPlannerEvent(id); await fetchEvents(); }
+    catch (err) { setPageError(err.response?.data?.error || 'Calendar sync failed. Please retry.'); }
+    finally { setSyncingEvent(null); }
   };
 
   const getEventsForDate = (dateStr) => events.filter(e => { const s = e.startDate ? new Date(e.startDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : ''; const en = e.endDate ? new Date(e.endDate).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }) : ''; return dateStr >= s && dateStr <= en; });
@@ -189,16 +197,17 @@ export default function Planner() {
                       <div className="flex items-center gap-1.5">
                         <h4 className="font-semibold text-sm truncate" style={{ color: 'var(--color-text)' }}>{event.title}</h4>
                         {event.gcalEventId && (
-                          <span title="Synced to Google Calendar" className="flex-shrink-0">
+                          <span title="Linked to Google Calendar" className="flex-shrink-0">
                             <GoogleIcon size={12} />
                           </span>
                         )}
                       </div>
                       <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
                         <Clock size={11} />
-                        {event.allDay ? "All Day" : `${new Date(event.startDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })} - ${new Date(event.endDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}`}
+                        {event.allDay ? "All Day" : `${new Date(event.startDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })} - ${new Date(event.endDate).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}`}
                       </p>
                       {event.description && <p className="text-xs mt-1.5 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>{event.description}</p>}
+                      {googleConnected && <button onClick={() => handleSync(event.id)} disabled={syncingEvent !== null} className="btn btn-ghost text-xs mt-2">{syncingEvent === event.id ? 'Syncing...' : 'Sync to Google'}</button>}
                     </div>
                     <button onClick={() => handleDelete(event.id)} className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-lg hover:bg-danger-surface cursor-pointer flex-shrink-0" style={{ color: 'var(--color-danger)' }}>
                       <Trash2 size={14} />

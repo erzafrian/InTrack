@@ -6,7 +6,7 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 module.exports = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  port: parseInt(process.env.PORT || '3001', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
 
@@ -18,18 +18,13 @@ module.exports = {
 
   s3: {
     endpoint: process.env.S3_ENDPOINT,
-    region: process.env.S3_REGION || 'auto',
+    region: process.env.S3_REGION,
     accessKeyId: process.env.S3_ACCESS_KEY_ID,
     secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-    bucketName: process.env.S3_BUCKET_NAME || 'getabsen',
+    bucketName: process.env.S3_BUCKET_NAME,
     publicUrl: process.env.S3_PUBLIC_URL,
   },
 
-  notion: {
-    clientId: process.env.NOTION_CLIENT_ID,
-    clientSecret: process.env.NOTION_CLIENT_SECRET,
-    redirectUri: process.env.NOTION_REDIRECT_URI || 'http://localhost:3001/api/auth/notion/callback',
-  },
 
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
@@ -44,8 +39,8 @@ module.exports = {
 
   ai: {
     apiKey: process.env.AI_API_KEY,
-    baseUrl: process.env.AI_BASE_URL || 'https://router.getcore.id/v1',
-    model: process.env.AI_MODEL || 'gemini-2.5-flash',
+    baseUrl: process.env.AI_BASE_URL || '',
+    model: process.env.AI_MODEL || '',
   },
 
   faceService: {

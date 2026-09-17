@@ -2,6 +2,9 @@ const { todayKey, nextDate } = require('../utils/operationalTime');
 const { google } = require('googleapis');
 const config = require('../config/env');
 const { prisma } = require('../middleware/auth');
+const crypto = require('crypto');
+const calendarError = () => Object.assign(new Error('Google Calendar could not be updated. Check the connection and try syncing again.'), { statusCode: 503 });
+const eventKey = event => crypto.createHash('sha256').update('intrack:' + event.id).digest('hex');
 
 const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
@@ -78,29 +81,40 @@ async function syncEventToCalendar(userId, event) {
         : { dateTime: event.endDate.toISOString(), timeZone },
     };
 
-    const res = await calendar.events[event.gcalEventId ? 'update' : 'insert']({
-      ...(event.gcalEventId ? { eventId: event.gcalEventId } : {}),
-      calendarId: 'primary',
-      requestBody: eventBody,
-    });
-
+    // Stable IDs make retry safe after a timeout or a failed local ID save.
+    const id = event.gcalEventId || eventKey(event);
+    let res;
+    try {
+      res = await calendar.events.update({ calendarId: 'primary', eventId: id, requestBody: eventBody }, { timeout: 15000 });
+    } catch (err) {
+      if (![404, 410].includes(Number(err.code || err.response?.status))) throw err;
+      const insertId = eventKey(event);
+      try {
+        res = await calendar.events.insert({ calendarId: 'primary', requestBody: { ...eventBody, id: insertId } }, { timeout: 15000 });
+      } catch (insertError) {
+        if (Number(insertError.code || insertError.response?.status) !== 409) throw insertError;
+        res = await calendar.events.update({ calendarId: 'primary', eventId: insertId, requestBody: eventBody }, { timeout: 15000 });
+      }
+    }
     return res.data.id;
   } catch (err) {
     console.error('[GoogleCalendar] Sync error:', err.message);
-    return null;
+    throw calendarError();
   }
 }
 
 async function deleteCalendarEvent(userId, gcalEventId) {
   if (!gcalEventId) return;
   const auth = await getAuthenticatedClient(userId);
-  if (!auth) return;
+  if (!auth) throw Object.assign(new Error('Reconnect Google Calendar before deleting a linked event.'), { statusCode: 409 });
 
   try {
     const calendar = google.calendar({ version: 'v3', auth });
-    await calendar.events.delete({ calendarId: 'primary', eventId: gcalEventId });
+    await calendar.events.delete({ calendarId: 'primary', eventId: gcalEventId }, { timeout: 15000 });
   } catch (err) {
+    if ([404, 410].includes(Number(err.code || err.response?.status))) return;
     console.error('[GoogleCalendar] Delete error:', err.message);
+    throw calendarError();
   }
 }
 
@@ -111,4 +125,5 @@ module.exports = {
   disconnect,
   syncEventToCalendar,
   deleteCalendarEvent,
+  eventKey,
 };

@@ -16,6 +16,7 @@ const googleRoutes = require('./routes/google.routes');
 const faceRoutes = require('./routes/face.routes');
 
 const app = express();
+app.set('trust proxy', 'loopback');
 
 // Middleware
 app.use(helmet());
@@ -26,6 +27,7 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(cookieParser());
+app.use('/api', require('./middleware/requestGuard'));
 
 // Routes
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));

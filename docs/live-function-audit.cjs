@@ -15,7 +15,7 @@ const results = [], users = [], objectKeys = [], settingKeys = [];
 let admin = '';
 function record(check, passed, detail) { results.push({ check, passed, detail }); }
 async function request(url, cookie = '', method = 'GET', body) {
-  const headers = cookie ? { Cookie: cookie } : {};
+  const headers = { 'X-InTrack-Request': '1', ...(cookie ? { Cookie: cookie } : {}) };
   if (body && !(body instanceof FormData)) headers['Content-Type'] = 'application/json';
   const r = await fetch(base + url, { method, headers, body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000) });
   const data = await r.json().catch(() => ({}));
@@ -50,7 +50,7 @@ async function main() {
   status('Access JWT must not work as refresh JWT', await request('/auth/refresh', `refreshToken=${accessCookie.slice('accessToken='.length)}`, 'POST'), 401);
   status('Intern admin access denied', await request('/admin/settings', a.cookie), 403);
   status('Mentor admin settings denied', await request('/admin/settings', mentor.cookie), 403);
-  status('Unknown settings key denied', await request('/admin/settings', admin, 'PUT', {notion_token:'not-allowed'}),400);
+  status('Unknown settings key denied', await request('/admin/settings', admin, 'PUT', {unknown_setting:'not-allowed'}),400);
   status('Invalid attendance time range denied', await request('/admin/settings', admin, 'PUT', {absen_start_time:'18:00',absen_end_time:'10:00'}),400);
   status('Invalid attendance filter date denied',await request('/attendance?startDate=2026-02-30',a.cookie),400);
   const entry = await request('/logbook', a.cookie, 'POST', { date: '2098-09-15' });
@@ -140,13 +140,11 @@ async function main() {
   const invalidFace = new FormData(); invalidFace.append('file', new Blob(['invalid']), 'invalid.png');
   const rejected = await fetch(config.faceService.baseUrl+'/enroll', { method:'POST', body:invalidFace, signal:AbortSignal.timeout(15000) });
   record('Face rejects invalid image', rejected.status===400, {status:rejected.status});
-  for(const route of ['/google/status','/auth/notion/status']) status(`Integration status ${route}`, await request(route,a.cookie));
-  for(const [route,expectedPath] of [['/google/auth-url','/api/google/callback'],['/auth/notion','/api/auth/notion/callback']]) {
-    const r=await request(route,route==='/auth/notion'?admin:a.cookie);status(`Generate OAuth URL ${route}`,r);
+  for(const route of ['/google/status']) status(`Integration status ${route}`, await request(route,a.cookie));
+  for(const [route,expectedPath] of [['/google/auth-url','/api/google/callback']]) {
+    const r=await request(route,a.cookie);status(`Generate OAuth URL ${route}`,r);
     if(r.data?.url) { const u=new URL(r.data.url); record(`OAuth callback path ${route}`,new URL(u.searchParams.get('redirect_uri')).pathname===expectedPath,{});record(`OAuth state is not plain user ID ${route}`,u.searchParams.get('state')!==a.id,{}); }
   }
-  status('Intern cannot manage shared Notion connection',await request('/auth/notion',a.cookie),403);
-  status('Mentor cannot change shared Notion database',await request('/auth/notion/database',mentor.cookie,'PUT',{dataSourceId:'invalid'}),403);
   // Provider health only: no real intern context or stored conversations are sent.
   try {
     const r=await fetch(config.ai.baseUrl+'/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${config.ai.apiKey}`,'Content-Type':'application/json'},body:JSON.stringify({model:config.ai.model,messages:[{role:'user',content:'Reply with OK only.'}],max_tokens:32}),signal:AbortSignal.timeout(30000)});

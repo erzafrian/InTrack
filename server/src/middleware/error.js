@@ -9,6 +9,7 @@ function errorHandler(err, req, res, next) {
   if (err.code === 'P2002') return error(res, 'A record with these values already exists', 409);
   if (err.code === 'P2025') return error(res, 'Record not found', 404);
   if (err.code === 'P2003') return error(res, 'This record is linked to other data', 409);
+  if (err.code === 'P2034') return error(res, 'Data changed during this request. Please try again.', 409);
   if (err.name === 'ValidationError' || err.name === 'PrismaClientValidationError') return error(res, 'Invalid request data', 400);
 
   if (err.name === 'JsonWebTokenError') {

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-require('../src/config/env').ai.apiKey = 'fixture-key';
+Object.assign(require('../src/config/env').ai, { apiKey: 'fixture-key', baseUrl: 'https://ai.example.invalid/v1', model: 'fixture-model' });
 const { chat, REPLIES, resolveLanguage } = require('../src/services/ai.service');
 const reply = content => ({ ok: true, json: async () => ({ choices: [{ message: { content } }] }) });
 const ask = content => [{ role: 'user', content }];

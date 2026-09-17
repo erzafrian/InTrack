@@ -4,22 +4,25 @@ function validateEvent(data) { if (typeof data.title !== 'string' || !data.title
 const { prisma } = require('../middleware/auth');
 const googleService = require('./google.service');
 
+async function syncSavedEvent(userId, event) {
+  try {
+    const gcalEventId = await googleService.syncEventToCalendar(userId, event);
+    if (!gcalEventId) return { ...event, calendarSync: 'not_connected' };
+    const saved = await prisma.plannerEvent.update({ where: { id: event.id }, data: { gcalEventId } });
+    return { ...saved, calendarSync: 'synced' };
+  } catch {
+    // The local save already succeeded: do not encourage a duplicate create.
+    return { ...event, calendarSync: 'failed', calendarWarning: 'Event saved in InTrack, but Google Calendar sync failed. Use Sync to Google to retry.' };
+  }
+}
+
 async function createEvent(userId, data) {
   validateEvent(data);
   const event = await prisma.plannerEvent.create({
     data: { userId, ...data },
   });
 
-  // Auto-sync to Google Calendar if connected
-  const gcalEventId = await googleService.syncEventToCalendar(userId, event);
-  if (gcalEventId) {
-    return prisma.plannerEvent.update({
-      where: { id: event.id },
-      data: { gcalEventId },
-    });
-  }
-
-  return event;
+  return syncSavedEvent(userId, event);
 }
 
 async function getEvents(userId, role, query) {
@@ -48,8 +51,13 @@ async function updateEvent(id, userId, data) {
   if (!event || event.userId !== userId) return null;
   validateEvent({ ...event, ...data });
   const updated = await prisma.plannerEvent.update({ where: { id }, data });
-  const gcalEventId = await googleService.syncEventToCalendar(userId, updated);
-  return gcalEventId ? prisma.plannerEvent.update({ where: { id }, data: { gcalEventId } }) : updated;
+  return syncSavedEvent(userId, updated);
+}
+
+async function retrySync(id, userId) {
+  const event = await prisma.plannerEvent.findUnique({ where: { id } });
+  if (!event || event.userId !== userId) return null;
+  return syncSavedEvent(userId, event);
 }
 
 async function deleteEvent(id, userId) {
@@ -59,9 +67,12 @@ async function deleteEvent(id, userId) {
   // Delete from Google Calendar if synced
   if (event.gcalEventId) {
     await googleService.deleteCalendarEvent(userId, event.gcalEventId);
+  } else if (await googleService.isConnected(userId)) {
+    // An earlier insert may have succeeded remotely despite a timeout.
+    await googleService.deleteCalendarEvent(userId, googleService.eventKey(event));
   }
 
   return prisma.plannerEvent.delete({ where: { id } });
 }
 
-module.exports = { createEvent, getEvents, updateEvent, deleteEvent };
+module.exports = { createEvent, getEvents, updateEvent, deleteEvent, retrySync };

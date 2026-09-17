@@ -3,8 +3,8 @@ function authCookieOptions(req) {
   return {
     httpOnly: true,
     secure,
-    // Browsers reject SameSite=None cookies without Secure on local HTTP.
-    sameSite: secure ? 'none' : 'lax',
+    // Frontend/API share a site; OAuth callbacks use a top-level navigation.
+    sameSite: 'lax',
     path: '/',
   };
 }

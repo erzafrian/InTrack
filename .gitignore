@@ -15,3 +15,7 @@ __pycache__/
 *.pfx
 credentials*.json
 service-account*.json
+
+# Local agent worktrees and generated audit reports
+.kilo/
+docs/*audit-results.json

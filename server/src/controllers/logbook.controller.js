@@ -1,6 +1,6 @@
 const { validateTask } = require('../utils/validation');
 const logbookService = require('../services/logbook.service');
-const r2Service = require('../services/r2.service');
+const storageService = require('../services/storage.service');
 const { success, error } = require('../utils/response');
 
 async function getEntries(req, res, next) {
@@ -35,14 +35,14 @@ async function addTask(req, res, next) {
     }
 
     if (req.file) {
-      evidenceUrl = await r2Service.uploadFile(req.file, 'logbook');
+      evidenceUrl = await storageService.uploadFile(req.file, 'logbook');
     }
 
     const task = await logbookService.addTask(req.params.entryId, { timeStart, timeEnd, activity: activity || '', quantitativeActivity, qualitativeActivity, output, evidenceUrl });
     evidenceUrl = null;
     return success(res, task, 201);
   } catch (err) {
-    if (evidenceUrl) await r2Service.deleteFile(evidenceUrl).catch(() => {});
+    if (evidenceUrl) await storageService.deleteFile(evidenceUrl).catch(() => {});
     next(err);
   }
 }
@@ -54,14 +54,14 @@ async function updateTask(req, res, next) {
     for (const key of ['timeStart','timeEnd','activity','quantitativeActivity','qualitativeActivity','output']) if (req.body[key] !== undefined) data[key] = req.body[key];
     validateTask({ ...req.ownedRecord, ...data });
     if (!req.file && !req.ownedRecord.evidenceUrl) return error(res, 'Evidence must be uploaded', 400);
-    if (req.file) evidenceUrl = await r2Service.uploadFile(req.file, 'logbook');
+    if (req.file) evidenceUrl = await storageService.uploadFile(req.file, 'logbook');
     if (evidenceUrl) data.evidenceUrl = evidenceUrl;
 
     const task = await logbookService.updateTask(req.params.taskId, data);
     evidenceUrl = null;
     return success(res, task);
   } catch (err) {
-    if (evidenceUrl) await r2Service.deleteFile(evidenceUrl).catch(() => {});
+    if (evidenceUrl) await storageService.deleteFile(evidenceUrl).catch(() => {});
     next(err);
   }
 }

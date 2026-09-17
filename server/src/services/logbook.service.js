@@ -1,5 +1,9 @@
 const { prisma } = require('../middleware/auth');
 const { parseDateOnly } = require('../utils/dateOnly');
+const storage = require('./storage.service');
+async function cleanupEvidence(url) {
+  if (url) await storage.deleteFile(url).catch(() => console.warn('[Storage] Old logbook evidence cleanup failed; manual retry is required.'));
+}
 
 async function getOrCreateEntry(userId, date) {
   const entryDate = parseDateOnly(date);
@@ -47,14 +51,19 @@ async function addTask(entryId, data) {
 }
 
 async function updateTask(taskId, data) {
-  return prisma.logbookTask.update({
-    where: { id: taskId },
-    data,
-  });
+  const { previous, task } = await prisma.$transaction(async tx => {
+    const previous = await tx.logbookTask.findUnique({ where: { id: taskId } });
+    const task = await tx.logbookTask.update({ where: { id: taskId }, data });
+    return { previous, task };
+  }, { isolationLevel: 'Serializable' });
+  if (previous?.evidenceUrl !== task.evidenceUrl) await cleanupEvidence(previous?.evidenceUrl);
+  return task;
 }
 
 async function deleteTask(taskId) {
-  return prisma.logbookTask.delete({ where: { id: taskId } });
+  const task = await prisma.logbookTask.delete({ where: { id: taskId } });
+  await cleanupEvidence(task.evidenceUrl);
+  return task;
 }
 
 module.exports = { getOrCreateEntry, getEntries, addTask, updateTask, deleteTask };

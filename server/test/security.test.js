@@ -19,7 +19,7 @@ function table(rows) {
     async updateMany({where,data}) { let count=0; for(const row of rows.values()) if(matches(row,where)) {Object.assign(row,data);count++;} return {count}; },
   };
 }
-const prisma = { authSession: table(sessions), oneTimeToken: table(tokens), user: { async findUnique(){return user;} }, async $transaction(fn){ return fn(prisma); } };
+const prisma = { authSession: table(sessions), oneTimeToken: table(tokens), user: { async findUnique(){return user;}, async findFirst(){return user;} }, async $transaction(fn){ return fn(prisma); } };
 const databasePath = require.resolve('../src/config/database');
 require.cache[databasePath] = { id:databasePath, filename:databasePath, loaded:true, exports:{prisma} };
 const auth = require('../src/services/auth.service');
@@ -61,7 +61,7 @@ test('OAuth state is bound to initiating browser and provider, and cannot replay
   const state = await oauth.begin({user,secure:false,headers:{}},res,'google');
   await assert.rejects(oauth.finish({headers:{},query:{state},cookies:{}},res,'google'),{statusCode:401});
   await assert.rejects(oauth.finish({headers:{},query:{state},cookies:{oauth_google:'wrong'}},res,'google'),{statusCode:401});
-  await assert.rejects(oauth.finish({headers:{},query:{state},cookies:{oauth_notion:cookies.oauth_google}},res,'notion'),{statusCode:401});
+  await assert.rejects(oauth.finish({headers:{},query:{state},cookies:{oauth_other:cookies.oauth_google}},res,'other'),{statusCode:401});
   assert.equal(await oauth.finish({headers:{},query:{state},cookies},res,'google'),user.id);
   await assert.rejects(oauth.finish({headers:{},query:{state},cookies},res,'google'),{statusCode:401});
 });

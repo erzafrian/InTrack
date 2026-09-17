@@ -4,7 +4,7 @@ const authCookieOptions = require('../utils/authCookies');
 
 async function login(req, res, next) {
   try {
-    const { email, password, rememberMe } = req.body;
+    const { email, password, rememberMe } = req.body || {};
     if (!email || !password) return error(res, 'Email and password required', 400);
 
     const result = await authService.login(email, password, !!rememberMe);
@@ -55,7 +55,7 @@ async function refresh(req, res, next) {
 }
 
 async function updateProfile(req, res, next) {
-  const r2Service = require('../services/r2.service');
+  const storageService = require('../services/storage.service');
   let uploadedUrl;
   try {
     const { prisma } = require('../middleware/auth');
@@ -65,20 +65,24 @@ async function updateProfile(req, res, next) {
 
     // Handle avatar upload
     if (req.file) {
-      const url = await r2Service.uploadFile(req.file, 'avatars');
+      const url = await storageService.uploadFile(req.file, 'avatars');
       uploadedUrl = url;
       if (url) data.avatarUrl = url;
     }
 
-    const user = await prisma.user.update({
-      where: { id: req.user.id },
-      data,
-      select: { id: true, name: true, email: true, role: true, department: true, avatarUrl: true },
-    });
+    const { user, previous } = await prisma.$transaction(async tx => {
+      const previous = await tx.user.findUnique({ where: { id: req.user.id }, select: { avatarUrl: true } });
+      const user = await tx.user.update({
+        where: { id: req.user.id }, data,
+        select: { id: true, name: true, email: true, role: true, department: true, avatarUrl: true },
+      });
+      return { user, previous };
+    }, { isolationLevel: 'Serializable' });
     uploadedUrl = null;
+    if (previous?.avatarUrl && previous.avatarUrl !== user.avatarUrl) await storageService.deleteFile(previous.avatarUrl).catch(() => console.warn('[Storage] Old avatar cleanup failed; manual retry is required.'));
     return success(res, user);
   } catch (err) {
-    if (uploadedUrl) await r2Service.deleteFile(uploadedUrl).catch(() => {});
+    if (uploadedUrl) await storageService.deleteFile(uploadedUrl).catch(() => {});
     next(err);
   }
 }

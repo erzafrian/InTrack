@@ -1,5 +1,5 @@
 import { attendanceLabel } from '../../utils/presentation';
-import { toLocalDateKey } from '../../utils/calendarDate';
+import { toLocalDateKey, fromLocalDateKey } from '../../utils/calendarDate';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../api/client';
 import { useAuth } from '../../context/auth';
@@ -193,7 +193,7 @@ export default function AttendanceView() {
                   <tr><td colSpan={6} className="text-center py-8" style={{ color: 'var(--color-text-muted)' }}>No data available</td></tr>
                 ) : attendances.map(a => (
                   <tr key={a.id}>
-                    <td style={{ color: 'var(--color-text)' }}>{new Date(a.date).toLocaleDateString("en-GB", { day: 'numeric', month: 'short' })}</td>
+                    <td style={{ color: 'var(--color-text)' }}>{fromLocalDateKey(a.date.slice(0, 10)).toLocaleDateString("en-GB", { day: 'numeric', month: 'short' })}</td>
                     <td className="font-medium" style={{ color: 'var(--color-text)' }}>{a.user?.name}</td>
                     <td>
                       <span className={`badge ${a.status === 'HADIR' ? 'badge-hadir' : a.status === 'IZIN' ? 'badge-izin' : 'badge-sakit'}`}>
@@ -202,7 +202,7 @@ export default function AttendanceView() {
                       </span>
                     </td>
                     <td className="hidden sm:table-cell">
-                      {a.checkInTime ? <span className="flex items-center gap-1"><Clock size={12} />{new Date(a.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}</span> : '-'}
+                      {a.checkInTime ? <span className="flex items-center gap-1"><Clock size={12} />{new Date(a.checkInTime).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })}</span> : '-'}
                     </td>
                     <td className="hidden md:table-cell">{a.distanceKm != null ? <span className="flex items-center gap-1"><MapPin size={12} />{a.distanceKm} km</span> : '-'}</td>
                     <td className="hidden lg:table-cell">{a.reason || '-'}</td>

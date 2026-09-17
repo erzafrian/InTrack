@@ -1,9 +1,8 @@
 const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const config = require('../config/env');
 const crypto = require('crypto');
-const path = require('path');
 
-const s3Client = (config.s3.endpoint && config.s3.accessKeyId) ? new S3Client({
+const s3Client = (config.s3.endpoint && config.s3.region && config.s3.accessKeyId && config.s3.secretAccessKey && config.s3.bucketName) ? new S3Client({
   region: config.s3.region,
   endpoint: config.s3.endpoint,
   credentials: {
@@ -30,12 +29,12 @@ async function uploadFile(file, folder = 'uploads') {
   }));
 
   return config.s3.publicUrl
-    ? `${config.s3.publicUrl}/${key}`
+    ? `${config.s3.publicUrl.replace(/\/$/, '')}/${key}`
     : `${config.s3.endpoint}/${config.s3.bucketName}/${key}`;
 }
 
 async function deleteFile(url) {
-  if (!url || !config.s3.publicUrl || !url.startsWith(config.s3.publicUrl.replace(/\/$/,'') + '/')) return;
+  if (!url || !s3Client || !config.s3.publicUrl || !url.startsWith(config.s3.publicUrl.replace(/\/$/,'') + '/')) return;
   const key = url.slice(config.s3.publicUrl.replace(/\/$/,'').length + 1);
   await s3Client.send(new DeleteObjectCommand({ Bucket: config.s3.bucketName, Key: key }));
 }

@@ -37,6 +37,8 @@ export default function Users() {
     setError('');
     if (!form.name || !form.email) { setError("Name and email are required"); return; }
     if (!editUser && !form.password) { setError("Password is required"); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) { setError('Use a valid email address'); return; }
+    if (form.password && (form.password.length < 12 || new TextEncoder().encode(form.password).length > 72)) { setError('Password must contain at least 12 characters and at most 72 UTF-8 bytes'); return; }
     setSubmitting(true);
     try {
       const data = { ...form };

@@ -1,48 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const settings = new Map([['notion_token','fixture-token'],['notion_data_source','a'.repeat(32)]]);
-const syncs = new Map();
-const prisma = {
-  appSetting: { async findUnique({where}) { return settings.has(where.key) ? {value:settings.get(where.key)} : null; } },
-  user: { async findUnique({where}) { return { name: where.id === 'a' ? 'Intern A' : 'Intern B' }; } },
-  externalSync: {
-    async upsert({where,create}) { if(!syncs.has(where.id))syncs.set(where.id,{...create});return syncs.get(where.id); },
-    async updateMany({where,data}) {Object.assign(syncs.get(where.id),data);return {count:1};},
-    async findUnique({where}) {return syncs.get(where.id);},
-    async update({where,data}) {Object.assign(syncs.get(where.id),data);return syncs.get(where.id);},
-  },
-};
-for(const modulePath of ['../src/config/database','../src/middleware/auth']) {
-  const id = require.resolve(modulePath); require.cache[id] = {id,filename:id,loaded:true,exports:{prisma}};
+const prisma = {};
+for (const modulePath of ['../src/config/database', '../src/middleware/auth']) {
+  const id = require.resolve(modulePath);
+  require.cache[id] = { id, filename: id, loaded: true, exports: { prisma } };
 }
 
-test('shared Notion sync uses chosen source and actual intern name; retries update existing page',async t=>{
-  const calls=[];
-  t.mock.method(global,'fetch',async(url,options)=>{calls.push({url,...options,body:JSON.parse(options.body)});return {ok:true,json:async()=>({id:'page-'+calls.length})};});
-  const notion = require('../src/services/notion.service');
-  const a = { id:'attendance-a',date:new Date('2026-09-15T00:00:00Z'),status:'HADIR',distanceKm:0,reason:null };
-  await notion.syncAttendanceToNotion('a',a);
-  await notion.syncAttendanceToNotion('a',{...a,status:'IZIN',reason:'Fixture'});
-  await notion.syncAttendanceToNotion('b',{...a,id:'attendance-b'});
-  assert.equal(calls[0].body.parent.data_source_id,'a'.repeat(32));
-  assert.equal(calls[0].body.properties.Name.title[0].text.content,'Intern A - 2026-09-15');
-  assert.equal(calls[0].body.properties.Distance.number,0);
-  assert.equal(calls[1].method,'PATCH');
-  assert.ok(calls[1].url.endsWith('/pages/page-1'));
-  assert.equal(calls[2].body.properties.Name.title[0].text.content,'Intern B - 2026-09-15');
-  assert.equal(syncs.size,2);
-  assert.ok([...syncs.values()].every(row=>row.status==='synced'));
-});
-
-test('Notion failures are retained as failed syncs for admin retry',async t=>{
-  t.mock.method(global,'fetch',async()=>({ok:false,status:403}));
-  const notion = require('../src/services/notion.service');
-  await assert.rejects(notion.syncAttendanceToNotion('a',{id:'failed',date:new Date('2026-09-15'),status:'HADIR',distanceKm:null}),{statusCode:502});
-  assert.equal([...syncs.values()].find(r=>r.entityId==='failed').status,'failed');
-});
-
 test('AI rejects provider credentials, quota, empty responses and timeout with useful errors',async t=>{
-  require('../src/config/env').ai.apiKey='fixture-key';
+  Object.assign(require('../src/config/env').ai, { apiKey: 'fixture-key', baseUrl: 'https://ai.example.invalid/v1', model: 'fixture-model' });
   const ai = require('../src/services/ai.service');
   const messages = [{ role: 'user', content: 'How many interns are registered?' }];
   const fetchMock=t.mock.method(global,'fetch',async()=>({ok:false,status:401}));
@@ -56,7 +21,7 @@ test('AI rejects provider credentials, quota, empty responses and timeout with u
 });
 
 test('logbook validates before upload and removes uploaded file if database save fails',async t=>{
-  const storage=require('../src/services/r2.service');
+  const storage=require('../src/services/storage.service');
   const logbook=require('../src/services/logbook.service');
   const controller=require('../src/controllers/logbook.controller');
   let uploads=0,deletes=0;

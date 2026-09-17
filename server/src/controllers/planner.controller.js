@@ -67,4 +67,14 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { create, getAll, update, remove };
+async function retrySync(req, res, next) {
+  try {
+    const event = await plannerService.retrySync(req.params.id, req.user.id);
+    if (!event) return error(res, 'Event not found or unauthorized', 404);
+    if (event.calendarSync === 'not_connected') return error(res, 'Connect Google Calendar before syncing.', 409);
+    if (event.calendarSync === 'failed') return error(res, event.calendarWarning, 503);
+    return success(res, event);
+  } catch (err) { next(err); }
+}
+
+module.exports = { create, getAll, update, remove, retrySync };

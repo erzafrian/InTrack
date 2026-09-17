@@ -39,7 +39,7 @@ export default function Logbook() {
 
   const fetchAllEntries = async () => {
     try {
-      const now = new Date();
+      const now = fromLocalDateKey(toLocalDateKey());
       const startDate = toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), 1));
       const endDate = toLocalDateKey(now);
       const res = await getLogbookEntries({ startDate, endDate });
@@ -76,7 +76,7 @@ export default function Logbook() {
 
   const downloadPDF = () => {
     const doc = new jsPDF();
-    const now = new Date();
+    const now = fromLocalDateKey(toLocalDateKey());
     const monthName = now.toLocaleDateString("en-GB", { month: 'long', year: 'numeric' });
 
     doc.setFont('helvetica', 'bold');

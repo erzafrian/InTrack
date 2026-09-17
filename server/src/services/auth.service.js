@@ -14,7 +14,7 @@ function tokenPair(user, sid, rememberMe) {
 }
 async function login(email, password, rememberMe = false) {
   if (typeof email !== 'string' || typeof password !== 'string') throw invalid();
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findFirst({ where: { email: { equals: email.trim(), mode: 'insensitive' } } });
   if (!user || !(await bcrypt.compare(password, user.passwordHash))) throw Object.assign(new Error('Invalid credentials'), { statusCode: 401 });
   const sid = crypto.randomUUID();
   const safeUser = Object.fromEntries(Object.keys(selectUser).map(key => [key, user[key]]));

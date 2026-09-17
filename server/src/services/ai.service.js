@@ -135,8 +135,8 @@ function responseStyle(text) {
 }
 
 async function complete(messages, maxTokens, signal) {
-  if (!config.ai.apiKey) {
-    throw Object.assign(new Error('AI API key not configured'), { statusCode: 501 });
+  if (!config.ai.apiKey || !config.ai.baseUrl || !config.ai.model) {
+    throw Object.assign(new Error('AI provider not configured. Set AI_API_KEY, AI_BASE_URL and AI_MODEL.'), { statusCode: 501 });
   }
 
   let res;

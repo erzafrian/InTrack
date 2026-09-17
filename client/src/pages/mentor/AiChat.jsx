@@ -111,6 +111,17 @@ export default function AiChat() {
   const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef(null);
+  const roomScope = useRef({ id: null, version: 0 });
+  const messageRequest = useRef(0);
+  const selectRoom = useCallback((id) => {
+    if (roomScope.current.id === id) return;
+    roomScope.current = { id, version: roomScope.current.version + 1 };
+    messageRequest.current++;
+    setMessages([greeting]);
+    setChatError('');
+    setActiveRoom(id);
+  }, []);
+  useEffect(() => () => { roomScope.current = { id: null, version: roomScope.current.version + 1 }; messageRequest.current++; }, []);
 
 
 
@@ -122,18 +133,22 @@ export default function AiChat() {
       const res = await api.get('/admin/mentor/chat-rooms');
       const data = res.data.data;
       setRooms(data);
-      if (data.length > 0) setActiveRoom(current => current || data[0].id);
+      if (data.length > 0 && !roomScope.current.id) selectRoom(data[0].id);
     } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); } finally { setRoomsLoaded(true); }
-  }, []);
+  }, [selectRoom]);
   useEffect(() => { loadRooms(); }, [loadRooms]);
 
   const loadMessages = useCallback(async (roomId) => {
     if (!roomId) { setMessages([greeting]); return; }
+    const version = roomScope.current.version;
+    const request = ++messageRequest.current;
+    const current = () => request === messageRequest.current && version === roomScope.current.version && roomId === roomScope.current.id;
     try {
       const res = await api.get(`/admin/mentor/chat-rooms/${roomId}/messages`);
       const data = res.data.data;
+      if (!current()) return;
       setMessages(data.length > 0 ? data.map(m => ({ role: m.role, content: m.content })) : [greeting]);
-    } catch { setMessages([greeting]); }
+    } catch { if (current()) setChatError('Unable to load conversation. Select the room again to retry.'); }
   }, []);
 
   useEffect(() => { if (activeRoom) loadMessages(activeRoom); else setMessages([greeting]); }, [activeRoom, loadMessages]);
@@ -141,19 +156,22 @@ export default function AiChat() {
   const handleSend = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
+    const scope = roomScope.current;
+    const current = () => scope.version === roomScope.current.version && scope.id === roomScope.current.id;
+    messageRequest.current++;
     setChatError('');
     setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
     setLoading(true);
     try {
-      const res = await api.post('/admin/mentor/ai-query', { query: userMsg, roomId: activeRoom });
-      setMessages(prev => [...prev, { role: 'assistant', content: res.data.data.response }]);
+      const res = await api.post('/admin/mentor/ai-query', { query: userMsg, roomId: scope.id });
+      if (!current()) { loadRooms(); return; }
       // If a new room was created by the backend, set it
-      if (res.data.data.roomId && !activeRoom) {
-        setActiveRoom(res.data.data.roomId);
-        loadRooms();
-      }
+      if (res.data.data.roomId && !scope.id) selectRoom(res.data.data.roomId);
+      else setMessages(prev => [...prev, { role: 'assistant', content: res.data.data.response }]);
+      loadRooms();
     } catch (err) {
+      if (!current()) return;
       setChatError(err.response?.data?.error || 'Unable to send your message. Please try again.');
       setMessages(prev => prev.slice(0, -1));
       setInput(userMsg);
@@ -166,7 +184,7 @@ export default function AiChat() {
     try {
       const res = await api.post('/admin/mentor/chat-rooms', { name: "New Chat" });
       await loadRooms();
-      setActiveRoom(res.data.data.id);
+      selectRoom(res.data.data.id);
     } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); }
   };
 
@@ -182,7 +200,7 @@ export default function AiChat() {
       await api.delete(`/admin/mentor/chat-rooms/${id}`);
       const updated = rooms.filter(r => r.id !== id);
       setRooms(updated);
-      if (activeRoom === id) setActiveRoom(updated[0]?.id || null);
+      if (roomScope.current.id === id) selectRoom(updated[0]?.id || null);
     } catch (err) { setChatError(err.response?.data?.error || 'Unable to load or update conversation. Please try again.'); }
   };
 
@@ -196,7 +214,7 @@ export default function AiChat() {
       )}
       {/* Room sidebar */}
       <div className={`absolute md:relative z-40 h-full w-64 min-w-[16rem] transition-transform duration-200 md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`} style={{ maxWidth: '80vw' }}>
-        <RoomSidebar rooms={rooms} activeRoom={activeRoom} onSelect={(id) => { setActiveRoom(id); setSidebarOpen(false); }} onCreate={createRoom} onRename={renameRoom} onDelete={deleteRoom} />
+        <RoomSidebar rooms={rooms} activeRoom={activeRoom} onSelect={(id) => { if (roomScope.current.id === id) loadMessages(id); else selectRoom(id); setSidebarOpen(false); }} onCreate={createRoom} onRename={renameRoom} onDelete={deleteRoom} />
       </div>
 
       {/* Chat area */}
